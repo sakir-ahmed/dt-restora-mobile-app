@@ -59,11 +59,94 @@ class _RefLoader extends StatelessWidget {
 class StockScreen extends StatelessWidget {
   const StockScreen({super.key});
 
+  /// Create or edit an ingredient (name, unit, reorder level, active).
+  Future<void> _editIngredient(BuildContext context, Map<String, dynamic> ref,
+      {Map<String, dynamic>? ingredient}) async {
+    final app = AppScope.read(context);
+    final name = TextEditingController(text: ingredient?['name'] as String? ?? '');
+    final nameBn = TextEditingController(text: ingredient?['name_bn'] as String? ?? '');
+    final reorder = TextEditingController(
+        text: ingredient == null ? '' : toNum(ingredient['reorder_level']).toStringAsFixed(2));
+    var unitId = (ingredient?['unit_id'] as num?)?.toInt() ?? (asRows(ref['units']).firstOrNull?['id'] as num?)?.toInt();
+    var active = ingredient?['is_active'] as bool? ?? true;
+    final units = asRows(ref['units']);
+
+    final go = await showForm<bool>(
+      context,
+      title: ingredient == null ? 'New ingredient' : 'Edit ingredient',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          field(name, 'Name (English)'),
+          field(nameBn, 'Bangla name (optional)'),
+          DropdownButtonFormField<int>(
+            initialValue: unitId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Unit'),
+            items: [
+              for (final u in units)
+                DropdownMenuItem(value: (u['id'] as num).toInt(), child: Text('${u['name']} (${u['symbol'] ?? ''})')),
+            ],
+            onChanged: (v) => set(() => unitId = v),
+          ),
+          const SizedBox(height: 12),
+          field(reorder, 'Low-stock alert level', type: const TextInputType.numberWithOptions(decimal: true)),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Active'),
+            value: active,
+            onChanged: (v) => set(() => active = v),
+          ),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ]),
+      ),
+    );
+    final n = name.text.trim();
+    final level = double.tryParse(reorder.text.trim());
+    final bn = nameBn.text.trim();
+    name.dispose();
+    nameBn.dispose();
+    reorder.dispose();
+    if (go != true || n.isEmpty || unitId == null || !context.mounted) {
+      return;
+    }
+    final editing = ingredient != null;
+    final body = {
+      'name': n,
+      ...bn.isNotEmpty ? {'name_bn': bn} : <String, dynamic>{},
+      'unit_id': unitId,
+      'reorder_level': ?level,
+      'is_active': active,
+    };
+    final ok = await guarded(context, () async {
+      if (editing) {
+        await app.api.put('/ingredients/${ingredient['id']}', body: body);
+      } else {
+        await app.api.post('/ingredients', body: body);
+      }
+    });
+    if (ok && context.mounted) {
+      snack(context, editing ? 'Ingredient updated.' : 'Ingredient created.');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Stock')),
+      floatingActionButton: app.can('inventory.manage')
+          ? FloatingActionButton.extended(
+              onPressed: () async {
+                final ref = await loadReference(app);
+                if (!context.mounted) {
+                  return;
+                }
+                await _editIngredient(context, ref);
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Ingredient'),
+            )
+          : null,
       body: _RefLoader(
         builder: (context, ref) {
           final ingredients = {for (final i in asRows(ref['ingredients'])) (i['id'] as num).toInt(): i};
@@ -77,7 +160,8 @@ class StockScreen extends StatelessWidget {
               separatorBuilder: (_, _) => const SizedBox(height: 8),
               itemBuilder: (context, i) {
                 final r = rows[i];
-                final meta = ingredients[(r['ingredient_id'] as num).toInt()];
+                final id = (r['ingredient_id'] as num).toInt();
+                final meta = ingredients[id];
                 final low = meta != null && toNum(r['stock_qty']) <= toNum(meta['reorder_level']);
                 return Card(
                   child: ListTile(
@@ -85,8 +169,16 @@ class StockScreen extends StatelessWidget {
                         color: low ? Brand.warning : context.brand),
                     title: Text('${r['name']}'),
                     subtitle: Text('Avg cost ${fmtMoney(r['avg_cost'])}${low ? '  -  Low stock' : ''}'),
-                    trailing: Text('${toNum(r['stock_qty']).toStringAsFixed(2)} ${meta?['unit_symbol'] ?? ''}',
-                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text('${toNum(r['stock_qty']).toStringAsFixed(2)} ${meta?['unit_symbol'] ?? ''}',
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      if (app.can('inventory.manage'))
+                        IconButton(
+                          tooltip: 'Edit ingredient',
+                          icon: const Icon(Icons.edit_outlined, size: 20),
+                          onPressed: () => _editIngredient(context, ref, ingredient: meta),
+                        ),
+                    ]),
                   ),
                 );
               },

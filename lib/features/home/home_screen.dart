@@ -9,10 +9,12 @@ import '../dashboard/dashboard_screen.dart';
 import '../delivery/delivery_screens.dart';
 import '../inventory/inventory_screens.dart';
 import '../orders/orders_screens.dart';
+import '../orders/reservations_screen.dart';
 import '../pos/pos_screen.dart';
 import '../reports/reports_screen.dart';
 import '../settings/settings_screen.dart';
 import '../shifts/shift_screen.dart';
+import '../staff/hr_screens.dart';
 import '../staff/staff_screens.dart';
 import '../sync/sync_screen.dart';
 import 'app_drawer.dart';
@@ -38,6 +40,7 @@ final modules = <Module>[
   Module('Dashboard', Icons.dashboard_customize, 'dashboard.view', (_) => const DashboardScreen()),
   Module('POS', Icons.point_of_sale, 'pos.access', (_) => const PosScreen(), hero: true),
   Module('Orders', Icons.receipt_long, 'orders.view', (_) => const OrdersScreen()),
+  Module('Reservations', Icons.event_available, 'reservations.view', (_) => const ReservationsScreen()),
   Module('Kitchen', Icons.soup_kitchen, 'kds.access', (_) => const KitchenScreen()),
   Module('Cash shift', Icons.savings, 'shifts.manage', (_) => const ShiftScreen()),
   Module('Tables', Icons.table_restaurant, 'tables.view', (_) => const TablesScreen()),
@@ -51,6 +54,8 @@ final modules = <Module>[
   Module('Customers', Icons.people, 'customers.view', (_) => const CustomersScreen(), group: 'People'),
   Module('Coupons', Icons.local_offer, 'coupons.manage', (_) => const CouponsScreen(), group: 'People'),
   Module('Staff', Icons.badge, 'staff.view', (_) => const StaffScreen(), group: 'People'),
+  Module('Attendance', Icons.schedule, 'attendance.manage', (_) => const AttendanceScreen(), group: 'People'),
+  Module('Payroll', Icons.payments_outlined, 'payroll.manage', (_) => const PayrollScreen(), group: 'Finance'),
   Module('Delivery', Icons.delivery_dining, 'delivery.dispatch', (_) => const DispatchScreen(), group: 'People'),
   Module('My deliveries', Icons.two_wheeler, null, (_) => const RiderScreen(), role: 'rider', group: 'People'),
   Module('Accounting', Icons.account_balance, 'accounting.view', (_) => const AccountingScreen(), group: 'Finance'),
