@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/api_client.dart';
+import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
 import 'payment_sheet.dart';
@@ -147,6 +148,45 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  /// Takes loyalty points off this order's customer, like the web order page.
+  Future<void> _redeemLoyalty() async {
+    final app = AppScope.read(context);
+    final customer = _order['customer'];
+    final points = TextEditingController();
+    final go = await showForm<bool>(
+      context,
+      title: 'Redeem loyalty points',
+      builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (customer is Map && customer['name'] != null)
+          Text('Customer: ${customer['name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        field(points, 'Points to redeem', type: const TextInputType.numberWithOptions(decimal: true)),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: Brand.warning),
+          onPressed: () => Navigator.pop(ctx, true),
+          icon: const Icon(Icons.stars),
+          label: const Text('Redeem'),
+        ),
+      ]),
+    );
+    final p = int.tryParse(points.text.trim());
+    points.dispose();
+    if (go != true || p == null || p <= 0 || !mounted) {
+      return;
+    }
+    await guarded(context, () async {
+      final res = await app.api.post(
+        '/branches/${app.branchId}/orders/${_order['id']}/loyalty/redeem',
+        body: {'points': p},
+      ) as Map;
+      await _refresh();
+      if (mounted) {
+        SoundFx.play('notification');
+        snack(context, 'Redeemed $p points. New balance: ${res['balance']}.');
+      }
+    });
+  }
+
   Future<void> _void() async {
     final app = AppScope.read(context);
     var reason = voidReasons.keys.first;
@@ -202,6 +242,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         await app.api.post('/void-requests/${res['id']}/approve');
         await _refresh();
         if (mounted) {
+          SoundFx.play('order_cancelled');
           snack(context, 'Order voided and stock restored.');
         }
       } else {
@@ -344,6 +385,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 8),
             FilledButton.tonalIcon(onPressed: _pay, icon: const Icon(Icons.payments), label: const Text('Take payment')),
           ],
+          if (status != 'paid' && status != 'void' && app.can('loyalty.manage') && _order['customer'] != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: Brand.warning),
+              onPressed: _redeemLoyalty,
+              icon: const Icon(Icons.stars_outlined),
+              label: const Text('Redeem loyalty points'),
+            ),
+          ],
           if (status == 'paid') ...[
             const SizedBox(height: 8),
             FilledButton.tonalIcon(
@@ -387,6 +437,9 @@ class _KitchenScreenState extends State<KitchenScreen> {
   /// plays for genuinely new or moved tickets, not on every poll.
   final _seenStage = <Object, String>{};
 
+  /// Pending ticket ids seen on the previous poll, to spot brand-new ones.
+  final _knownPending = <Object>{};
+
   Timer? _poll;
   Timer? _ticker;
   bool _loading = true;
@@ -420,6 +473,15 @@ class _KitchenScreenState extends State<KitchenScreen> {
           app.cachedGet('/branches/${app.branchId}/orders', query: {'filter[status]': s, 'per_page': 50}),
       ]);
       if (!mounted) return;
+      final pending = _orderRows(results[0].data);
+      final freshIds = pending.map((o) => o['id']).where((id) => !_knownPending.contains(id)).toList();
+      _knownPending
+        ..clear()
+        ..addAll(pending.map((o) => o['id']));
+      // Chime for tickets that arrived between polls, not the first load.
+      if (freshIds.isNotEmpty && _knownPending.length > freshIds.length) {
+        SoundFx.play('kds_new');
+      }
       setState(() {
         _offline = results.any((r) => r.fromCache);
         for (var i = 0; i < _stages.length; i++) {
@@ -438,6 +500,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
   Future<void> _advance(Map<String, dynamic> order, String from, String to) async {
     final app = AppScope.read(context);
     HapticFeedback.mediumImpact();
+    SoundFx.play('kds_$to');
     setState(() {
       _orders[from] = _orders[from]!.where((o) => o['id'] != order['id']).toList();
       order['status'] = to;
@@ -485,8 +548,6 @@ class _KitchenScreenState extends State<KitchenScreen> {
             ),
           ],
           bottom: TabBar(
-            labelColor: Colors.white,
-            unselectedLabelColor: Brand.soft,
             tabs: [for (final s in _stages) Tab(text: titleCase(s))],
           ),
         ),

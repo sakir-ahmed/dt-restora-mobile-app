@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_state.dart';
+import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
 
@@ -162,6 +163,7 @@ class _PaymentFormState extends State<_PaymentForm> {
         body: body,
         idempotencyKey: newClientId(),
       );
+      SoundFx.play('order_paid');
       final change = result is Map ? result['change'] : null;
       final changeValue = toNum(change) > 0 ? toNum(change) : (isSingleCash ? max(0, _amountOf(first) - widget.total) : 0);
       message = changeValue > 0
@@ -189,6 +191,7 @@ class _PaymentFormState extends State<_PaymentForm> {
           label: 'Payment ${titleCase(l.method)} ${fmtMoney(_amountOf(l))} for order ${widget.orderId}',
         );
       }
+      SoundFx.play('order_paid');
       message = 'Offline: payment saved and will sync.';
     }
     if (mounted) {

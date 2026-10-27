@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_state.dart';
+import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../ui/food_image.dart';
 import '../../ui/widgets.dart';
@@ -125,6 +126,7 @@ class _PosScreenState extends State<PosScreen> {
         existing.first.quantity += qty;
       }
     });
+    SoundFx.play('item_added');
     _persist();
   }
 
@@ -273,6 +275,7 @@ class _PosScreenState extends State<PosScreen> {
     });
     _persistHeld();
     _persist();
+    SoundFx.play('order_held');
     snack(context, 'Order parked. Resume it from the held list in the app bar.');
   }
 
@@ -909,6 +912,7 @@ class _PosScreenState extends State<PosScreen> {
         return;
       }
       final invoice = '${order['invoice_no']}';
+      SoundFx.play('order_created');
       _reset();
       Navigator.of(sheetContext).pop();
       if (pay) {
@@ -946,6 +950,7 @@ class _PosScreenState extends State<PosScreen> {
           label: 'POS order ($lineCount lines, ${fmtMoney(totals.total)})',
         );
         if (mounted && sheetContext.mounted) {
+          SoundFx.play('order_created');
           _reset();
           Navigator.of(sheetContext).pop();
           snack(context, pay ? 'Offline: order and cash payment saved. Will sync.' : 'Offline: order saved. Will sync.');
@@ -981,7 +986,7 @@ class _PosScreenState extends State<PosScreen> {
       appBar: AppBar(
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('POS', style: TextStyle(fontSize: 18)),
-          if (branch != null) Text(branch, style: const TextStyle(fontSize: 12, color: Brand.accent)),
+          if (branch != null) Text(branch, style: TextStyle(fontSize: 12, color: context.brand)),
         ]),
         actions: [
           Stack(alignment: Alignment.center, children: [

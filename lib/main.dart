@@ -7,6 +7,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'core/api_client.dart';
 import 'core/app_state.dart';
 import 'core/local_db.dart';
+import 'core/sounds.dart';
 import 'core/theme.dart';
 import 'features/auth/login_screen.dart';
 import 'features/home/home_screen.dart';
@@ -20,6 +21,7 @@ Future<void> main() async {
   unawaited(WakelockPlus.enable());
   final state = AppState(api: ApiClient(), db: await LocalDb.open());
   await state.init();
+  unawaited(SoundFx.init());
   runApp(DtRestoraApp(state: state));
 }
 

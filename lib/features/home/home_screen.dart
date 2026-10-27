@@ -82,7 +82,7 @@ class HomeScreen extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(app.appName, style: const TextStyle(fontSize: 17), maxLines: 1, overflow: TextOverflow.ellipsis),
               if (branch != null)
-                Text(branch, style: const TextStyle(fontSize: 12, color: Brand.accent), overflow: TextOverflow.ellipsis),
+                Text(branch, style: TextStyle(fontSize: 12, color: context.brand), overflow: TextOverflow.ellipsis),
             ]),
           ),
         ]),

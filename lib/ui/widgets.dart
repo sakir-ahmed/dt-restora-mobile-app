@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../core/api_client.dart';
 import '../core/app_state.dart';
 import '../core/config.dart';
+import '../core/sounds.dart';
 import '../core/theme.dart';
 
 class AppScope extends InheritedNotifier<AppState> {
@@ -93,6 +94,7 @@ Future<bool> guarded(BuildContext context, Future<void> Function() action) async
     await action();
     return true;
   } on ApiException catch (e) {
+    SoundFx.play('error');
     if (context.mounted) {
       snack(context, e.fullMessage, error: true);
     }

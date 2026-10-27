@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/app_state.dart';
+import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
 
@@ -91,12 +93,57 @@ class _CustomersScreenState extends State<CustomersScreen> {
 class CouponsScreen extends StatelessWidget {
   const CouponsScreen({super.key});
 
+  /// Runs a code against the server's coupon rules with a sample subtotal,
+  /// like the web coupon validator.
+  Future<void> _checkCode(BuildContext context, AppState app) async {
+    final code = TextEditingController();
+    final subtotal = TextEditingController();
+    final go = await showForm<bool>(
+      context,
+      title: 'Check a coupon code',
+      builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        field(code, 'Code'),
+        field(subtotal, 'Order subtotal (BDT)', type: const TextInputType.numberWithOptions(decimal: true)),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Check')),
+      ]),
+    );
+    final c = code.text.trim().toUpperCase();
+    final s = double.tryParse(subtotal.text.trim());
+    code.dispose();
+    subtotal.dispose();
+    if (go != true || c.isEmpty || s == null || !context.mounted) {
+      return;
+    }
+    final ok = await guarded(context, () async {
+      final res = await app.api.post('/coupons/validate', body: {'code': c, 'subtotal': s}) as Map;
+      if (context.mounted) {
+        final discount = toNum(res['discount'] ?? res['value']);
+        snack(
+          context,
+          discount > 0
+              ? 'Valid: ${res['type'] == 'percent' ? '${toNum(res['value']).toStringAsFixed(0)}% off' : fmtMoney(res['value'])} - you save ${fmtMoney(discount)}.'
+              : 'Coupon accepted for this order.',
+        );
+      }
+    });
+    if (ok) {
+      SoundFx.play('notification');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     return ListModule(
       title: 'Coupons',
       path: '/coupons',
+      actions: [
+        IconButton(
+          tooltip: 'Check a coupon code',
+          icon: const Icon(Icons.verified_outlined),
+          onPressed: () => _checkCode(context, app),
+        ),
+      ],
       itemBuilder: (context, c, reload) => Card(
         child: ListTile(
           title: Text('${c['code']}', style: const TextStyle(fontWeight: FontWeight.w700)),

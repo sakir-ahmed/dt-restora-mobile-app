@@ -128,10 +128,12 @@ ThemeData buildTheme(Brightness brightness) {
     scaffoldBackgroundColor: bg,
     dividerColor: line,
     appBarTheme: AppBarTheme(
-      backgroundColor: dark ? Brand.darkSurface : Brand.navy,
-      foregroundColor: Colors.white,
+      backgroundColor: dark ? Brand.darkSurface : Colors.white,
+      foregroundColor: dark ? Brand.cloud : Brand.navy,
       elevation: 0,
-      titleTextStyle: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white),
+      scrolledUnderElevation: 0,
+      shape: Border(bottom: BorderSide(color: line)),
+      titleTextStyle: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: dark ? Colors.white : Brand.navy),
     ),
     cardTheme: CardThemeData(
       color: scheme.surface,
@@ -187,9 +189,9 @@ ThemeData buildTheme(Brightness brightness) {
       backgroundColor: dark ? Brand.darkBorder : Brand.navy,
       contentTextStyle: const TextStyle(color: Colors.white),
     ),
-    tabBarTheme: const TabBarThemeData(
-      labelColor: Colors.white,
-      unselectedLabelColor: Brand.soft,
+    tabBarTheme: TabBarThemeData(
+      labelColor: dark ? Colors.white : Brand.primary,
+      unselectedLabelColor: dark ? Brand.soft : Brand.slate,
       indicatorColor: Brand.accent,
     ),
     listTileTheme: ListTileThemeData(iconColor: scheme.primary),
