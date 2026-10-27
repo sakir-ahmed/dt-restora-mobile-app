@@ -624,6 +624,7 @@ Widget field(
   bool obscure = false,
   int maxLines = 1,
   String? hint,
+  bool dense = false,
 }) => Padding(
   padding: const EdgeInsets.only(bottom: 12),
   child: TextField(
@@ -631,6 +632,6 @@ Widget field(
     keyboardType: type,
     obscureText: obscure,
     maxLines: maxLines,
-    decoration: InputDecoration(labelText: label, hintText: hint),
+    decoration: InputDecoration(labelText: label, hintText: hint, isDense: dense),
   ),
 );

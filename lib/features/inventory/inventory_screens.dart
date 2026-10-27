@@ -4,6 +4,7 @@ import '../../core/api_client.dart';
 import '../../core/app_state.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
+import 'menu_manage_screen.dart';
 
 const wastageReasons = ['spoiled', 'dropped', 'complimentary', 'over_production', 'kitchen_mistake', 'other'];
 
@@ -99,14 +100,87 @@ class StockScreen extends StatelessWidget {
 
 // ---------------------------------------------------------------- wastage
 
-class WastageScreen extends StatefulWidget {
+class WastageScreen extends StatelessWidget {
   const WastageScreen({super.key});
 
   @override
-  State<WastageScreen> createState() => _WastageScreenState();
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Wastage'),
+          bottom: const TabBar(
+            tabs: [Tab(text: 'Log wastage'), Tab(text: 'History')],
+          ),
+        ),
+        body: const TabBarView(children: [_LogWastageView(), _WastageHistoryView()]),
+      ),
+    );
+  }
 }
 
-class _WastageScreenState extends State<WastageScreen> {
+/// The wastage table, newest first.
+class _WastageHistoryView extends StatelessWidget {
+  const _WastageHistoryView();
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    return DataView<List<Map<String, dynamic>>>(
+      path: '/branches/${app.branchId}/wastage',
+      transform: asRows,
+      builder: (context, rows, raw, reload) => rows.isEmpty
+          ? ListView(children: const [SizedBox(height: 160), EmptyState('No wastage recorded yet.')])
+          : ListView.separated(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(12),
+              itemCount: rows.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, i) {
+                final w = rows[i];
+                final ingredient = w['ingredient'] as Map?;
+                final unit = w['unit'] as Map?;
+                final user = w['user'] as Map?;
+                return Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.delete_sweep_outlined, color: Brand.danger),
+                    title: Text('${ingredient?['name'] ?? 'Ingredient #${w['ingredient_id']}'}'
+                        '  -  ${toNum(w['qty']).toStringAsFixed(2)} ${unit?['symbol'] ?? ''}'),
+                    subtitle: Text(
+                      [
+                        titleCase('${w['reason_code']}'),
+                        if (user?['name'] != null) '${user!['name']}',
+                        if (w['created_at'] != null) fmtDate(w['created_at']),
+                      ].join('  -  '),
+                      style: TextStyle(color: context.muted, fontSize: 12),
+                    ),
+                    trailing: w['note'] == null
+                        ? null
+                        : ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 110),
+                            child: Text('${w['note']}',
+                                textAlign: TextAlign.right,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: context.muted, fontSize: 11)),
+                          ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _LogWastageView extends StatefulWidget {
+  const _LogWastageView();
+
+  @override
+  State<_LogWastageView> createState() => _LogWastageViewState();
+}
+
+class _LogWastageViewState extends State<_LogWastageView> {
   int? _ingredient;
   String _reason = wastageReasons.first;
   final _qty = TextEditingController();
@@ -604,6 +678,184 @@ class RecipesScreen extends StatelessWidget {
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RecipeCostScreen(recipe: r, title: menuNames[(r['menu_item_id'] as num).toInt()] ?? 'Recipe'))),
         ),
       ),
+      fab: (reload) => FloatingActionButton.extended(
+        onPressed: () async {
+          final saved = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(builder: (_) => const RecipeFormScreen()),
+          );
+          if (saved == true) {
+            await reload();
+          }
+        },
+        icon: const Icon(Icons.add),
+        label: const Text('Recipe'),
+      ),
+    );
+  }
+}
+
+/// Create or edit a recipe: the dish plus ingredient lines with quantities.
+class RecipeFormScreen extends StatefulWidget {
+  const RecipeFormScreen({super.key, this.recipe, this.fixedMenuItemId});
+
+  /// Null creates a new recipe.
+  final Map<String, dynamic>? recipe;
+
+  /// Set when editing; the dish itself cannot change.
+  final int? fixedMenuItemId;
+
+  @override
+  State<RecipeFormScreen> createState() => _RecipeFormScreenState();
+}
+
+class _RecipeFormScreenState extends State<RecipeFormScreen> {
+  final _note = TextEditingController();
+  final List<({int? ingredient, TextEditingController qty})> _lines = [];
+  int? _menuItem;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _menuItem = widget.fixedMenuItemId ?? widget.recipe?['menu_item_id'] as int?;
+    _note.text = '${widget.recipe?['note'] ?? ''}';
+    for (final l in asRows(widget.recipe?['items'])) {
+      _lines.add((
+        ingredient: (l['ingredient_id'] as num?)?.toInt(),
+        qty: TextEditingController(text: toNum(l['qty']).toStringAsFixed(2)),
+      ));
+    }
+    if (_lines.isEmpty) {
+      _lines.add((ingredient: null, qty: TextEditingController()));
+    }
+  }
+
+  @override
+  void dispose() {
+    _note.dispose();
+    for (final l in _lines) {
+      l.qty.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final app = AppScope.read(context);
+    final items = <Map<String, dynamic>>[];
+    for (final l in _lines) {
+      final qty = double.tryParse(l.qty.text.trim());
+      if (l.ingredient != null && qty != null && qty > 0) {
+        items.add({'ingredient_id': l.ingredient, 'qty': qty});
+      }
+    }
+    if (_menuItem == null || items.isEmpty) {
+      snack(context, 'Choose the dish and at least one ingredient.', error: true);
+      return;
+    }
+    setState(() => _busy = true);
+    final editing = widget.recipe != null || widget.fixedMenuItemId != null;
+    final body = {
+      if (!editing) 'menu_item_id': _menuItem,
+      if (_note.text.trim().isNotEmpty) 'note': _note.text.trim(),
+      'lines': items,
+    };
+    final ok = await guarded(context, () async {
+      if (editing) {
+        await app.api.put('/recipes/${widget.recipe?['id'] ?? 0}', body: body);
+      } else {
+        await app.api.post('/recipes', body: body);
+      }
+    });
+    if (!mounted) {
+      return;
+    }
+    setState(() => _busy = false);
+    if (ok) {
+      snack(context, editing ? 'Recipe updated.' : 'Recipe saved.');
+      Navigator.pop(context, true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final editing = widget.fixedMenuItemId != null;
+    final menuItems = [
+      for (final c in asRows(app.bootstrap?['categories']))
+        for (final i in asRows(c['items'])) i,
+    ];
+    return Scaffold(
+      appBar: AppBar(title: Text(editing ? 'Edit recipe' : 'New recipe')),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: FilledButton(onPressed: _busy ? null : _save, child: Text(_busy ? 'Saving...' : 'Save recipe')),
+        ),
+      ),
+      body: _RefLoader(
+        require: const ['ingredients'],
+        builder: (context, ref) {
+          final ingredients = asRows(ref['ingredients']);
+          return ListView(padding: const EdgeInsets.all(16), children: [
+            DropdownButtonFormField<int>(
+              initialValue: _menuItem,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Menu item'),
+              items: [
+                for (final i in menuItems)
+                  DropdownMenuItem(value: (i['id'] as num).toInt(), child: Text(localized(app, i))),
+              ],
+              onChanged: editing ? null : (v) => setState(() => _menuItem = v),
+            ),
+            const SizedBox(height: 12),
+            for (var i = 0; i < _lines.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(children: [
+                  Expanded(
+                    flex: 3,
+                    child: DropdownButtonFormField<int>(
+                      initialValue: _lines[i].ingredient,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Ingredient', isDense: true),
+                      items: [
+                        for (final ing in ingredients)
+                          DropdownMenuItem(
+                            value: (ing['id'] as num).toInt(),
+                            child: Text('${ing['name']} (${ing['unit_symbol'] ?? ''})'),
+                          ),
+                      ],
+                      onChanged: (v) => setState(() => _lines[i] = (ingredient: v, qty: _lines[i].qty)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: field(_lines[i].qty, 'Qty',
+                        type: const TextInputType.numberWithOptions(decimal: true), dense: true),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.remove_circle_outline, color: Brand.danger),
+                    onPressed: () => setState(() {
+                      _lines[i].qty.dispose();
+                      _lines.removeAt(i);
+                    }),
+                  ),
+                ]),
+              ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _lines.add((ingredient: null, qty: TextEditingController()))),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add ingredient'),
+              ),
+            ),
+            field(_note, 'Note (optional)'),
+          ]);
+        },
+      ),
     );
   }
 }
@@ -618,6 +870,19 @@ class RecipeCostScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(title)),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => RecipeFormScreen(
+              recipe: recipe,
+              fixedMenuItemId: (recipe['menu_item_id'] as num).toInt(),
+            ),
+          ),
+        ),
+        icon: const Icon(Icons.edit_outlined),
+        label: const Text('Edit'),
+      ),
       body: _RefLoader(
         builder: (context, _) => DataView<Map<String, dynamic>>(
           path: '/recipes/${recipe['id']}/cost',
@@ -656,7 +921,20 @@ class MenuViewScreen extends StatelessWidget {
     final app = AppScope.of(context);
     final cats = asRows(app.bootstrap?['categories']);
     return Scaffold(
-      appBar: AppBar(title: const Text('Menu')),
+      appBar: AppBar(
+        title: const Text('Menu'),
+        actions: [
+          if (app.can('menu.manage'))
+            IconButton(
+              tooltip: 'Add or edit menu items',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MenuManageScreen()),
+              ),
+            ),
+        ],
+      ),
       body: cats.isEmpty
           ? const EmptyState('The menu has not been downloaded yet.')
           : ListView(padding: const EdgeInsets.all(12), children: [
