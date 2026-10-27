@@ -8,14 +8,17 @@ import '../core/sounds.dart';
 import '../core/theme.dart';
 
 class AppScope extends InheritedNotifier<AppState> {
-  const AppScope({super.key, required AppState state, required super.child}) : super(notifier: state);
+  const AppScope({super.key, required AppState state, required super.child})
+    : super(notifier: state);
 
   static AppState of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!.notifier!;
 
   /// Read without subscribing to rebuilds.
   static AppState read(BuildContext context) =>
-      (context.getElementForInheritedWidgetOfExactType<AppScope>()!.widget as AppScope).notifier!;
+      (context.getElementForInheritedWidgetOfExactType<AppScope>()!.widget
+              as AppScope)
+          .notifier!;
 }
 
 final _money = NumberFormat('#,##0.00');
@@ -55,21 +58,42 @@ String localized(AppState app, Map m, [String key = 'name']) {
   return '${m[key] ?? ''}';
 }
 
-List<Map<String, dynamic>> asRows(Object? v) =>
-    ((v as List?) ?? const []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+List<Map<String, dynamic>> asRows(Object? v) => ((v as List?) ?? const [])
+    .whereType<Map>()
+    .map((e) => Map<String, dynamic>.from(e))
+    .toList();
 
-void snack(BuildContext context, String message, {bool error = false, String? actionLabel, VoidCallback? onAction}) {
+void snack(
+  BuildContext context,
+  String message, {
+  bool error = false,
+  String? actionLabel,
+  VoidCallback? onAction,
+}) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(
-      content: Text(message),
-      duration: Duration(seconds: actionLabel == null ? 4 : 8),
-      backgroundColor: error ? Theme.of(context).colorScheme.error : null,
-      action: actionLabel == null ? null : SnackBarAction(label: actionLabel, textColor: Brand.accent, onPressed: onAction ?? () {}),
-    ));
+    ..showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: Duration(seconds: actionLabel == null ? 4 : 8),
+        backgroundColor: error ? Theme.of(context).colorScheme.error : null,
+        action: actionLabel == null
+            ? null
+            : SnackBarAction(
+                label: actionLabel,
+                textColor: Brand.accent,
+                onPressed: onAction ?? () {},
+              ),
+      ),
+    );
 }
 
-Future<bool> confirm(BuildContext context, String title, {String? body, String action = 'Confirm'}) async {
+Future<bool> confirm(
+  BuildContext context,
+  String title, {
+  String? body,
+  String action = 'Confirm',
+}) async {
   final ok = await showDialog<bool>(
     context: context,
     // The dialog's own context must close it: the caller's context can be
@@ -78,7 +102,10 @@ Future<bool> confirm(BuildContext context, String title, {String? body, String a
       title: Text(title),
       content: body == null ? null : Text(body),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
           style: FilledButton.styleFrom(minimumSize: const Size(96, 40)),
           onPressed: () => Navigator.pop(dialogContext, true),
@@ -91,7 +118,10 @@ Future<bool> confirm(BuildContext context, String title, {String? body, String a
 }
 
 /// Runs [action], showing API errors as a snackbar. Returns true on success.
-Future<bool> guarded(BuildContext context, Future<void> Function() action) async {
+Future<bool> guarded(
+  BuildContext context,
+  Future<void> Function() action,
+) async {
   try {
     await action();
     return true;
@@ -148,7 +178,11 @@ class StatusChip extends StatelessWidget {
       ),
       child: Text(
         titleCase(status),
-        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -168,15 +202,30 @@ class BrandLogo extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [c1, c2]),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [c1, c2],
+        ),
         borderRadius: BorderRadius.circular(size * 0.26),
       ),
-      child: Icon(Icons.room_service_outlined, color: Colors.white, size: size * 0.58),
+      child: Icon(
+        Icons.room_service_outlined,
+        color: Colors.white,
+        size: size * 0.58,
+      ),
     );
   }
 }
 
-class Metric extends StatelessWidget {  const Metric(this.label, this.value, {super.key, this.icon, this.negative = false});
+class Metric extends StatelessWidget {
+  const Metric(
+    this.label,
+    this.value, {
+    super.key,
+    this.icon,
+    this.negative = false,
+  });
 
   final String label;
   final String value;
@@ -191,10 +240,20 @@ class Metric extends StatelessWidget {  const Metric(this.label, this.value, {su
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              if (icon != null) ...[Icon(icon, size: 16, color: context.muted), const SizedBox(width: 6)],
-              Expanded(child: Text(label, style: TextStyle(color: context.muted, fontSize: 12))),
-            ]),
+            Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 16, color: context.muted),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(color: context.muted, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 6),
             Text(
               value,
@@ -222,26 +281,31 @@ class SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
-        child: Row(children: [
-          if (color != null) ...[
-            Container(
-              width: 4,
-              height: 16,
-              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+    padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+    child: Row(
+      children: [
+        if (color != null) ...[
+          Container(
+            width: 4,
+            height: 16,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2),
             ),
-            const SizedBox(width: 8),
-          ],
-          Expanded(
-            child: Text(text,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700, color: context.fg)),
           ),
-          ?trailing,
-        ]),
-      );
+          const SizedBox(width: 8),
+        ],
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700, color: context.fg),
+          ),
+        ),
+        ?trailing,
+      ],
+    ),
+  );
 }
 
 class EmptyState extends StatelessWidget {
@@ -251,11 +315,15 @@ class EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(text, textAlign: TextAlign.center, style: TextStyle(color: context.muted)),
-        ),
-      );
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(color: context.muted),
+      ),
+    ),
+  );
 }
 
 /// Slim persistent footer shown under every main screen. Gives content a
@@ -276,23 +344,28 @@ class AppFooter extends StatelessWidget {
           border: Border(top: BorderSide(color: context.lineColor)),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        child: Row(children: [
-          Icon(
-            app.online ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
-            size: 13,
-            color: app.online ? Brand.success : Brand.warning,
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              '© $year ${app.appName}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+        child: Row(
+          children: [
+            Icon(
+              app.online ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+              size: 13,
+              color: app.online ? Brand.success : Brand.warning,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '© $year ${app.appName}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10.5, color: context.muted),
+              ),
+            ),
+            Text(
+              'v${AppConfig.appVersion}',
               style: TextStyle(fontSize: 10.5, color: context.muted),
             ),
-          ),
-          Text('v${AppConfig.appVersion}', style: TextStyle(fontSize: 10.5, color: context.muted)),
-        ]),
+          ],
+        ),
       ),
     );
   }
@@ -305,22 +378,24 @@ class OfflineNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        color: context.warnBg,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: Row(children: [
-          Icon(Icons.cloud_off, size: 16, color: context.warnFg),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              savedAt == null
-                  ? 'Offline: showing saved data'
-                  : 'Offline: showing data saved ${DateFormat('d MMM, h:mm a').format(savedAt!)}',
-              style: TextStyle(fontSize: 12, color: context.warnFg),
-            ),
+    width: double.infinity,
+    color: context.warnBg,
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+    child: Row(
+      children: [
+        Icon(Icons.cloud_off, size: 16, color: context.warnFg),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            savedAt == null
+                ? 'Offline: showing saved data'
+                : 'Offline: showing data saved ${DateFormat('d MMM, h:mm a').format(savedAt!)}',
+            style: TextStyle(fontSize: 12, color: context.warnFg),
           ),
-        ]),
-      );
+        ),
+      ],
+    ),
+  );
 }
 
 /// Loads a cached GET and renders [builder]; handles loading, errors,
@@ -337,8 +412,13 @@ class DataView<T> extends StatefulWidget {
   final String path;
   final Map<String, dynamic>? query;
   final T Function(dynamic raw)? transform;
-  final Widget Function(BuildContext context, T data, Cached<dynamic> raw, Future<void> Function() reload)
-      builder;
+  final Widget Function(
+    BuildContext context,
+    T data,
+    Cached<dynamic> raw,
+    Future<void> Function() reload,
+  )
+  builder;
 
   @override
   State<DataView<T>> createState() => DataViewState<T>();
@@ -353,7 +433,8 @@ class DataViewState<T> extends State<DataView<T>> {
     _future ??= _load();
   }
 
-  Future<Cached<dynamic>> _load() => AppScope.read(context).cachedGet(widget.path, query: widget.query);
+  Future<Cached<dynamic>> _load() =>
+      AppScope.read(context).cachedGet(widget.path, query: widget.query);
 
   Future<void> reload() async {
     final next = _load();
@@ -379,20 +460,39 @@ class DataViewState<T> extends State<DataView<T>> {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text('${snap.error}', textAlign: TextAlign.center, style: TextStyle(color: context.muted)),
-                const SizedBox(height: 16),
-                OutlinedButton(onPressed: reload, child: const Text('Try again')),
-              ]),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${snap.error}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.muted),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton(
+                    onPressed: reload,
+                    child: const Text('Try again'),
+                  ),
+                ],
+              ),
             ),
           );
         }
         final raw = snap.data!;
-        final data = widget.transform != null ? widget.transform!(raw.data) : raw.data as T;
-        return Column(children: [
-          if (raw.fromCache) OfflineNote(raw.savedAt),
-          Expanded(child: RefreshIndicator(onRefresh: reload, child: widget.builder(context, data, raw, reload))),
-        ]);
+        final data = widget.transform != null
+            ? widget.transform!(raw.data)
+            : raw.data as T;
+        return Column(
+          children: [
+            if (raw.fromCache) OfflineNote(raw.savedAt),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: reload,
+                child: widget.builder(context, data, raw, reload),
+              ),
+            ),
+          ],
+        );
       },
     );
   }
@@ -416,8 +516,12 @@ class ListModule extends StatefulWidget {
   final String path;
   final Map<String, dynamic>? query;
   final List<Map<String, dynamic>> Function(dynamic raw)? extract;
-  final Widget Function(BuildContext context, Map<String, dynamic> row, Future<void> Function() reload)
-      itemBuilder;
+  final Widget Function(
+    BuildContext context,
+    Map<String, dynamic> row,
+    Future<void> Function() reload,
+  )
+  itemBuilder;
   final Widget Function(Future<void> Function() reload)? fab;
   final List<Widget>? actions;
   final Widget? header;
@@ -440,10 +544,16 @@ class _ListModuleState extends State<ListModule> {
         key: _key,
         path: widget.path,
         query: widget.query,
-        transform: (raw) => widget.extract != null ? widget.extract!(raw) : asRows(raw),
+        transform: (raw) =>
+            widget.extract != null ? widget.extract!(raw) : asRows(raw),
         builder: (context, rows, raw, reload) {
           if (rows.isEmpty) {
-            return ListView(children: const [SizedBox(height: 120), EmptyState('Nothing here yet.')]);
+            return ListView(
+              children: const [
+                SizedBox(height: 120),
+                EmptyState('Nothing here yet.'),
+              ],
+            );
           }
           return ListView.separated(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -467,19 +577,36 @@ class _ListModuleState extends State<ListModule> {
 }
 
 /// Bottom sheet that hosts a form; returns when closed.
-Future<T?> showForm<T>(BuildContext context, {required String title, required WidgetBuilder builder}) {
+Future<T?> showForm<T>(
+  BuildContext context, {
+  required String title,
+  required WidgetBuilder builder,
+}) {
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     builder: (ctx) => Padding(
-      padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+      // Keyboard inset while typing plus the gesture-bar inset when closed,
+      // so a form's last button is never under the screen edge.
+      padding: EdgeInsets.fromLTRB(
+        20,
+        0,
+        20,
+        MediaQuery.of(ctx).viewInsets.bottom +
+            MediaQuery.of(ctx).padding.bottom +
+            20,
+      ),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(title, style: Theme.of(ctx).textTheme.titleLarge?.copyWith(color: context.fg)),
+            Text(
+              title,
+              style: Theme.of(ctx).textTheme.titleLarge
+                  ?.copyWith(color: context.fg),
+            ),
             const SizedBox(height: 16),
             builder(ctx),
           ],
@@ -489,15 +616,20 @@ Future<T?> showForm<T>(BuildContext context, {required String title, required Wi
   );
 }
 
-Widget field(TextEditingController c, String label,
-        {TextInputType? type, bool obscure = false, int maxLines = 1, String? hint}) =>
-    Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextField(
-        controller: c,
-        keyboardType: type,
-        obscureText: obscure,
-        maxLines: maxLines,
-        decoration: InputDecoration(labelText: label, hintText: hint),
-      ),
-    );
+Widget field(
+  TextEditingController c,
+  String label, {
+  TextInputType? type,
+  bool obscure = false,
+  int maxLines = 1,
+  String? hint,
+}) => Padding(
+  padding: const EdgeInsets.only(bottom: 12),
+  child: TextField(
+    controller: c,
+    keyboardType: type,
+    obscureText: obscure,
+    maxLines: maxLines,
+    decoration: InputDecoration(labelText: label, hintText: hint),
+  ),
+);
