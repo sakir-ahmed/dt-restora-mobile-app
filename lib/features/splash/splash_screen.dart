@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/theme.dart';
+import '../../core/config.dart';
 import '../../ui/widgets.dart';
 
-/// Branded opening screen. Runs its animation once, fades out and hands
+/// Branded opening screen, kept deliberately minimal: the logo mark, the
+/// app name, and a quiet three-dot loader. Runs once, fades out and hands
 /// over to whatever _Root shows underneath (setup, login or home).
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key, required this.onDone});
@@ -18,7 +19,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1900),
+    duration: const Duration(milliseconds: 1700),
   );
   bool _leaving = false;
 
@@ -29,12 +30,12 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       if (status != AnimationStatus.completed) {
         return;
       }
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       if (!mounted) {
         return;
       }
       setState(() => _leaving = true);
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await Future<void>.delayed(const Duration(milliseconds: 320));
       if (mounted) {
         widget.onDone();
       }
@@ -51,88 +52,68 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final (_, brandDark, _) = brandColors(app.brandKey);
-    final logoFade = CurvedAnimation(parent: _c, curve: const Interval(0, 0.28, curve: Curves.easeOut));
+    final logoFade = CurvedAnimation(parent: _c, curve: const Interval(0, 0.3, curve: Curves.easeOut));
     final logoScale = CurvedAnimation(parent: _c, curve: const Interval(0, 0.45, curve: Curves.easeOutBack));
-    final nameFade = CurvedAnimation(parent: _c, curve: const Interval(0.22, 0.5, curve: Curves.easeOut));
-    final taglineFade = CurvedAnimation(parent: _c, curve: const Interval(0.38, 0.62, curve: Curves.easeOut));
-    final progressFade = CurvedAnimation(parent: _c, curve: const Interval(0.6, 0.8, curve: Curves.easeOut));
+    final nameFade = CurvedAnimation(parent: _c, curve: const Interval(0.2, 0.55, curve: Curves.easeOut));
+    final footerFade = CurvedAnimation(parent: _c, curve: const Interval(0.55, 0.8, curve: Curves.easeOut));
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: AnimatedOpacity(
         opacity: _leaving ? 0 : 1,
-        duration: const Duration(milliseconds: 350),
+        duration: const Duration(milliseconds: 320),
         child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [const Color(0xFF081020), const Color(0xFF0A1428), brandDark],
-            ),
-          ),
+          // One calm navy; no gradient, no glow, nothing to distract.
+          color: const Color(0xFF0A1428),
           child: SafeArea(
             child: Column(children: [
               const Spacer(flex: 5),
-              // Logo card with a soft brand glow.
               ScaleTransition(
                 scale: logoScale,
-                child: FadeTransition(
-                  opacity: logoFade,
-                  child: Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(28),
-                      boxShadow: [
-                        BoxShadow(
-                          color: brandDark.withValues(alpha: 0.45),
-                          blurRadius: 40,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                    child: BrandLogo(size: 84),
-                  ),
-                ),
+                child: FadeTransition(opacity: logoFade, child: BrandLogo(size: 88)),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 26),
               FadeTransition(
                 opacity: nameFade,
                 child: SlideTransition(
-                  position: Tween(begin: const Offset(0, 0.35), end: Offset.zero).animate(nameFade),
-                  child: Column(children: [
-                    Text(
-                      app.appName,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.3,
-                      ),
+                  position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(nameFade),
+                  child: Text(
+                    app.appName,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 25,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.3,
                     ),
-                    const SizedBox(height: 8),
-                    FadeTransition(
-                      opacity: taglineFade,
-                      child: const Text(
-                        'Restaurant operations suite',
-                        style: TextStyle(color: Brand.soft, fontSize: 13, letterSpacing: 0.6),
-                      ),
-                    ),
-                  ]),
+                  ),
                 ),
               ),
               const Spacer(flex: 6),
               FadeTransition(
-                opacity: progressFade,
-                child: SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: CircularProgressIndicator(color: brandDark, strokeWidth: 2.4),
-                ),
+                opacity: footerFade,
+                child: Column(children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    for (var i = 0; i < 3; i++) ...[
+                      Container(
+                        width: 6,
+                        height: 6,
+                        margin: const EdgeInsets.symmetric(horizontal: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.85 - i * 0.3),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
+                  ]),
+                  const SizedBox(height: 14),
+                  Text(
+                    'v${AppConfig.appVersion}',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                  ),
+                ]),
               ),
-              const SizedBox(height: 34),
+              const SizedBox(height: 30),
             ]),
           ),
         ),
