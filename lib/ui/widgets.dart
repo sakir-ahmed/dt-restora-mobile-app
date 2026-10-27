@@ -72,14 +72,16 @@ void snack(BuildContext context, String message, {bool error = false, String? ac
 Future<bool> confirm(BuildContext context, String title, {String? body, String action = 'Confirm'}) async {
   final ok = await showDialog<bool>(
     context: context,
-    builder: (_) => AlertDialog(
+    // The dialog's own context must close it: the caller's context can be
+    // gone by the time the user answers (e.g. a drawer that already closed).
+    builder: (dialogContext) => AlertDialog(
       title: Text(title),
       content: body == null ? null : Text(body),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
         FilledButton(
           style: FilledButton.styleFrom(minimumSize: const Size(96, 40)),
-          onPressed: () => Navigator.pop(context, true),
+          onPressed: () => Navigator.pop(dialogContext, true),
           child: Text(action),
         ),
       ],

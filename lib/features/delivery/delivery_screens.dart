@@ -162,8 +162,6 @@ class RiderScreen extends StatelessWidget {
         appBar: AppBar(
           title: const Text('My deliveries'),
           bottom: const TabBar(
-            labelColor: Colors.white,
-            unselectedLabelColor: Brand.soft,
             tabs: [Tab(text: 'Deliveries'), Tab(text: 'Cash to hand over')],
           ),
         ),

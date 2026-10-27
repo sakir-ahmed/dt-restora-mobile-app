@@ -26,8 +26,6 @@ class AccountingScreen extends StatelessWidget {
           title: const Text('Accounting'),
           bottom: const TabBar(
             isScrollable: true,
-            labelColor: Colors.white,
-            unselectedLabelColor: Brand.soft,
             tabs: [Tab(text: 'Statements'), Tab(text: 'Journals'), Tab(text: 'Vouchers'), Tab(text: 'Payables'), Tab(text: 'Accounts')],
           ),
         ),

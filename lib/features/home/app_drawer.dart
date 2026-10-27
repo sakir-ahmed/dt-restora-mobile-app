@@ -164,9 +164,12 @@ class AppDrawer extends StatelessWidget {
 
   Future<void> _logout(BuildContext context) async {
     final app = AppScope.read(context);
-    Navigator.pop(context);
-    if (await confirm(context, 'Log out?', body: 'You will need your password to sign in to ${app.appName} again.', action: 'Log out')) {
+    if (await confirm(context, 'Log out?',
+        body: 'You will need your password to sign in to ${app.appName} again.', action: 'Log out')) {
       await app.logout();
+      if (context.mounted) {
+        Navigator.pop(context);
+      }
     }
   }
 }
