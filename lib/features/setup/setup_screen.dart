@@ -60,12 +60,7 @@ class _SetupScreenState extends State<SetupScreen> {
           padding: const EdgeInsets.all(24),
           children: [
             const SizedBox(height: 16),
-            Center(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: Image.asset('assets/brand/logo-512.png', width: 72, height: 72),
-              ),
-            ),
+            const Center(child: BrandLogo(size: 72)),
             const SizedBox(height: 22),
             Text('Welcome',
                 textAlign: TextAlign.center,

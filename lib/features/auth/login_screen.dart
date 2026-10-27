@@ -87,10 +87,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: Image.asset('assets/brand/logo-512.png', width: 72, height: 72),
-            ),
+            const BrandLogo(size: 72),
             const SizedBox(height: 20),
             Text('DT Restora',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(

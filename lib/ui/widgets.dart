@@ -154,8 +154,29 @@ class StatusChip extends StatelessWidget {
   }
 }
 
-class Metric extends StatelessWidget {
-  const Metric(this.label, this.value, {super.key, this.icon, this.negative = false});
+/// The app mark: a rounded square in the brand gradient with the serving
+/// cloche glyph, so the logo always matches the selected brand colour.
+class BrandLogo extends StatelessWidget {
+  const BrandLogo({super.key, this.size = 40});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final (c1, c2, _) = brandColors(AppScope.of(context).brandKey);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [c1, c2]),
+        borderRadius: BorderRadius.circular(size * 0.26),
+      ),
+      child: Icon(Icons.room_service_outlined, color: Colors.white, size: size * 0.58),
+    );
+  }
+}
+
+class Metric extends StatelessWidget {  const Metric(this.label, this.value, {super.key, this.icon, this.negative = false});
 
   final String label;
   final String value;
