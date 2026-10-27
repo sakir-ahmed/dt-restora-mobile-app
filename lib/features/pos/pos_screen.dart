@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -53,6 +55,7 @@ class _PosScreenState extends State<PosScreen> {
   final List<CartLine> _cart = [];
   final _search = TextEditingController();
   final _note = TextEditingController();
+  final _customerMobile = TextEditingController();
   int _category = 0; // 0 is "All", then 1..n are the categories
   String _orderType = 'takeaway';
   int? _tableId;
@@ -60,13 +63,27 @@ class _PosScreenState extends State<PosScreen> {
   bool _busy = false;
   bool _listMode = false;
 
+  /// Order-level discount, like the web POS bill discount.
+  String _discountType = 'percent';
+  double _discountValue = 0;
+
+  /// Parked orders: [{orderType, tableId, discountType, discountValue,
+  /// customerMobile, note, heldAt, lines: [{i, v, q, a: [addOnIds]}]}].
+  List<Map<String, dynamic>> _held = [];
+
+  String get _prefsCartKey => 'pos_cart';
+  String get _prefsHeldKey => 'pos_held';
+
   @override
   void initState() {
     super.initState();
     SharedPreferences.getInstance().then((p) {
-      if (mounted) {
-        setState(() => _listMode = p.getBool('pos_list_mode') ?? false);
+      if (!mounted) {
+        return;
       }
+      setState(() => _listMode = p.getBool('pos_list_mode') ?? false);
+      _loadHeld();
+      _restoreCart();
     });
   }
 
@@ -79,6 +96,7 @@ class _PosScreenState extends State<PosScreen> {
   void dispose() {
     _search.dispose();
     _note.dispose();
+    _customerMobile.dispose();
     super.dispose();
   }
 
@@ -86,6 +104,14 @@ class _PosScreenState extends State<PosScreen> {
 
   double get _subtotal => _cart.fold(0, (s, l) => s + l.total);
   int get _count => _cart.fold(0, (s, l) => s + l.quantity);
+
+  double get _discountAmount {
+    if (_discountValue <= 0) {
+      return 0;
+    }
+    final raw = _discountType == 'percent' ? _subtotal * _discountValue / 100 : _discountValue;
+    return raw.clamp(0, _subtotal);
+  }
 
   int _qtyOfItem(int itemId) => _cart.where((l) => l.itemId == itemId).fold(0, (s, l) => s + l.quantity);
 
@@ -99,27 +125,242 @@ class _PosScreenState extends State<PosScreen> {
         existing.first.quantity += qty;
       }
     });
+    _persist();
   }
 
   void _decrement(CartLine line) {
     setState(() => line.quantity <= 1 ? _cart.remove(line) : line.quantity--);
+    _persist();
   }
 
-  void _reset() => setState(() {
-        _cart.clear();
-        _tableId = null;
-        _note.clear();
-      });
+  void _reset() {
+    setState(() {
+      _cart.clear();
+      _tableId = null;
+      _note.clear();
+      _customerMobile.clear();
+      _discountValue = 0;
+    });
+    _persist();
+  }
 
-  ({double service, double vat, double total}) _totals(AppState app) {
+  ({double service, double vat, double discount, double total}) _totals(AppState app) {
     final branch = app.bootstrap?['branch'] as Map? ?? {};
     final servicePct = toNum(branch['service_charge_percent']);
     final vatPct = toNum(branch['vat_percent']);
     final inclusive = branch['vat_inclusive'] == true;
-    final service = _subtotal * servicePct / 100;
-    final vat = inclusive ? 0.0 : (_subtotal + service) * vatPct / 100;
+    final discount = _discountAmount;
+    final net = _subtotal - discount;
+    final service = net * servicePct / 100;
+    final vat = inclusive ? 0.0 : (net + service) * vatPct / 100;
     // The server rounds order totals to whole taka.
-    return (service: service, vat: vat, total: (_subtotal + service + vat).roundToDouble());
+    return (service: service, vat: vat, discount: discount, total: (net + service + vat).roundToDouble());
+  }
+
+  // ------------------------------------------------------------ persistence
+
+  Map<String, dynamic> _snapshot() => {
+        'orderType': _orderType,
+        'tableId': _tableId,
+        'discountType': _discountType,
+        'discountValue': _discountValue,
+        'customerMobile': _customerMobile.text,
+        'note': _note.text,
+        'lines': [
+          for (final l in _cart)
+            {
+              'i': l.itemId,
+              'v': l.variantId,
+              'q': l.quantity,
+              'a': [for (final a in l.addOns) a['id']],
+            }
+        ],
+      };
+
+  Future<void> _persist() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsCartKey, jsonEncode(_snapshot()));
+  }
+
+  Future<void> _loadHeld() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_prefsHeldKey);
+    if (raw == null || raw.isEmpty) {
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List && mounted) {
+        setState(() => _held = decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList());
+      }
+    } on FormatException {
+      // Ignore a corrupted list; held orders are a convenience.
+    }
+  }
+
+  Future<void> _persistHeld() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsHeldKey, jsonEncode(_held));
+  }
+
+  /// Rebuilds a cart from a snapshot by matching ids against the current
+  /// menu; lines whose item has disappeared are skipped.
+  List<CartLine> _linesFromSnapshot(List<dynamic> raw, AppState app) {
+    final items = [for (final c in asRows(app.bootstrap?['categories'])) ...asRows(c['items'])];
+    final lines = <CartLine>[];
+    for (final row in raw.whereType<Map>()) {
+      final item = items.where((i) => (i['id'] as num?)?.toInt() == row['i']).firstOrNull;
+      if (item == null) {
+        continue;
+      }
+      final variants = asRows(item['variants']);
+      final variant = variants.where((v) => (v['id'] as num?)?.toInt() == row['v']).firstOrNull;
+      final addOnIds = ((row['a'] as List?) ?? const []).map((e) => (e as num).toInt()).toSet();
+      final addOns = _activeAddOns(item)
+          .where((a) => addOnIds.contains((a['id'] as num).toInt()))
+          .map((a) => {'id': a['id'], 'name': a['name'], 'name_bn': a['name_bn'], 'price': a['price']})
+          .toList();
+      lines.add(CartLine(
+        item: item,
+        variant: variant,
+        quantity: (row['q'] as num).toInt(),
+        addOns: addOns,
+      ));
+    }
+    return lines;
+  }
+
+  Future<void> _restoreCart() async {
+    final app = AppScope.read(context);
+    if (_cart.isNotEmpty || (app.bootstrap?['categories'] as List?)?.isEmpty != false) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_prefsCartKey);
+    if (raw == null || raw.isEmpty) {
+      return;
+    }
+    try {
+      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final lines = _linesFromSnapshot(decoded['lines'] as List? ?? const [], app);
+      if (lines.isEmpty || !mounted) {
+        return;
+      }
+      setState(() {
+        _cart.addAll(lines);
+        _orderType = '${decoded['orderType']}';
+        _tableId = decoded['tableId'] as int?;
+        _discountType = '${decoded['discountType']}';
+        _discountValue = toNum(decoded['discountValue']);
+        _customerMobile.text = '${decoded['customerMobile'] ?? ''}';
+        _note.text = '${decoded['note'] ?? ''}';
+      });
+    } on FormatException {
+      // Ignore a corrupted ticket.
+    }
+  }
+
+  // ------------------------------------------------------------ hold / resume
+
+  /// Parks the current order and clears the terminal, like the web POS.
+  void _hold() {
+    if (_cart.isEmpty) {
+      return;
+    }
+    setState(() {
+      _held.insert(0, {..._snapshot(), 'heldAt': DateTime.now().toIso8601String()});
+      _reset();
+    });
+    _persistHeld();
+    _persist();
+    snack(context, 'Order parked. Resume it from the held list in the app bar.');
+  }
+
+  void _resume(Map<String, dynamic> ticket) {
+    final app = AppScope.read(context);
+    final lines = _linesFromSnapshot(ticket['lines'] as List? ?? const [], app);
+    if (lines.isEmpty) {
+      snack(context, 'This order\'s items are no longer on the menu.', error: true);
+      return;
+    }
+    setState(() {
+      _reset();
+      _cart.addAll(lines);
+      _orderType = '${ticket['orderType']}';
+      _tableId = ticket['tableId'] as int?;
+      _discountType = '${ticket['discountType']}';
+      _discountValue = toNum(ticket['discountValue']);
+      _customerMobile.text = '${ticket['customerMobile'] ?? ''}';
+      _note.text = '${ticket['note'] ?? ''}';
+      _held.remove(ticket);
+    });
+    _persistHeld();
+    _persist();
+  }
+
+  void _discardHeld(Map<String, dynamic> ticket) {
+    setState(() => _held.remove(ticket));
+    _persistHeld();
+  }
+
+  Future<void> _showHeld() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Parked orders', style: Theme.of(ctx).textTheme.titleLarge),
+              const SizedBox(height: 4),
+              Text('Hold an order mid-way and take it back later. Saved on this device.', style: TextStyle(color: ctx.muted, fontSize: 12)),
+              const SizedBox(height: 8),
+              Flexible(
+                child: _held.isEmpty
+                    ? const EmptyState('No parked orders.')
+                    : ListView(shrinkWrap: true, children: [
+                        for (final t in List.of(_held))
+                          Card(
+                            child: ListTile(
+                              leading: const Icon(Icons.pause_presentation),
+                              title: Text(
+                                '${(t['lines'] as List? ?? const []).fold<int>(0, (s, l) => s + (((l as Map)['q'] as num?) ?? 0).toInt())} items'
+                                '${t['tableId'] != null ? '  -  Table ${t['tableId']}' : ''}',
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              subtitle: Text(
+                                '${titleCase('${t['orderType']}')} parked ${t['heldAt'] == null ? '' : fmtDate(t['heldAt'])}',
+                                style: TextStyle(color: ctx.muted, fontSize: 12),
+                              ),
+                              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.pop(ctx);
+                                    _resume(t);
+                                  },
+                                  child: const Text('Resume'),
+                                ),
+                                IconButton(
+                                  tooltip: 'Discard',
+                                  icon: const Icon(Icons.delete_outline, size: 20, color: Brand.danger),
+                                  onPressed: () {
+                                    _discardHeld(t);
+                                    setSheet(() {});
+                                  },
+                                ),
+                              ]),
+                            ),
+                          ),
+                      ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 
   // ------------------------------------------------------------ item picking
@@ -398,6 +639,7 @@ class _PosScreenState extends State<PosScreen> {
           void refresh() {
             setState(() {});
             setSheet(() {});
+            _persist();
             if (_cart.isEmpty) {
               Navigator.pop(ctx);
             }
@@ -491,10 +733,48 @@ class _PosScreenState extends State<PosScreen> {
                   ),
                 const Divider(height: 24),
                 _row(ctx, 'Subtotal', fmtMoney(_subtotal)),
+                if (totals.discount > 0)
+                  _row(ctx, 'Discount', '-${fmtMoney(totals.discount)}', bold: false, color: Brand.success),
                 if (totals.service > 0) _row(ctx, 'Service charge', fmtMoney(totals.service)),
                 if (totals.vat > 0) _row(ctx, 'VAT', fmtMoney(totals.vat)),
                 _row(ctx, 'Total', fmtMoney(totals.total), bold: true),
+                const SizedBox(height: 4),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+                      onPressed: () => _editDiscount(ctx, setSheet),
+                      icon: Icon(
+                        _discountValue > 0 ? Icons.discount : Icons.discount_outlined,
+                        size: 18,
+                        color: _discountValue > 0 ? Brand.success : null,
+                      ),
+                      label: Text(
+                        _discountValue > 0
+                            ? _discountType == 'percent'
+                                ? '${_trimNum(_discountValue)}% off'
+                                : '${fmtMoney(_discountValue)} off'
+                            : 'Discount',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+                      onPressed: () {
+                        _hold();
+                        Navigator.pop(ctx);
+                      },
+                      icon: const Icon(Icons.pause_presentation, size: 18),
+                      label: const Text('Hold'),
+                    ),
+                  ),
+                ]),
                 const SizedBox(height: 12),
+                field(_customerMobile, 'Customer mobile (optional)', type: TextInputType.phone),
                 field(_note, 'Note for the kitchen (optional)'),
                 Row(children: [
                   Expanded(
@@ -522,13 +802,74 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
-  Widget _row(BuildContext context, String a, String b, {bool bold = false}) => Padding(
+  Widget _row(BuildContext context, String a, String b, {bool bold = false, Color? color}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text(a, style: TextStyle(fontWeight: bold ? FontWeight.w800 : null, fontSize: bold ? 16 : 14, color: bold ? null : context.muted)),
-          Text(b, style: TextStyle(fontWeight: bold ? FontWeight.w800 : FontWeight.w500, fontSize: bold ? 16 : 14)),
+          Text(b, style: TextStyle(fontWeight: bold ? FontWeight.w800 : FontWeight.w600, fontSize: bold ? 16 : 14, color: color)),
         ]),
       );
+
+  String _trimNum(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+
+  /// Bill-level discount: a percentage of the subtotal or a fixed amount,
+  /// like the web POS discount panel.
+  Future<void> _editDiscount(BuildContext sheetContext, void Function(void Function()) setSheet) async {
+    final controller = TextEditingController(
+        text: _discountValue > 0 ? _trimNum(_discountValue) : '');
+    var type = _discountType;
+    final saved = await showModalBottomSheet<bool>(
+      context: sheetContext,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Bill discount', style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text('Applied before service charge and VAT.', style: TextStyle(color: ctx.muted, fontSize: 12)),
+            const SizedBox(height: 16),
+            Row(children: [
+              for (final t in const [('percent', 'Percent'), ('fixed', 'Fixed amount')])
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: t.$1 == 'percent' ? 8 : 0),
+                    child: ChoiceChip(
+                      label: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Text(t.$2)),
+                      selected: type == t.$1,
+                      onSelected: (_) => setDialog(() => type = t.$1),
+                    ),
+                  ),
+                ),
+            ]),
+            const SizedBox(height: 12),
+            field(controller, type == 'percent' ? 'Percent off (e.g. 10)' : 'Amount off (BDT)',
+                type: const TextInputType.numberWithOptions(decimal: true)),
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Apply discount'),
+            ),
+            TextButton(
+              onPressed: _discountValue > 0 ? () => Navigator.pop(ctx, false) : null,
+              child: const Text('Remove discount'),
+            ),
+          ]),
+        ),
+      ),
+    );
+    final text = controller.text.trim();
+    controller.dispose();
+    if (saved == null) {
+      return;
+    }
+    setState(() {
+      _discountType = type;
+      _discountValue = saved ? (double.tryParse(text) ?? 0) : 0;
+    });
+    setSheet(() {});
+  }
 
   Future<void> _place(AppState app, BuildContext sheetContext, {required bool pay}) async {
     if (_orderType == 'dine_in' && _tableId == null && asRows(app.bootstrap?['tables']).isNotEmpty) {
@@ -554,6 +895,8 @@ class _PosScreenState extends State<PosScreen> {
         'items': items,
         'terminal': 'T01',
         'restaurant_table_id': ?(_orderType == 'dine_in' ? _tableId : null),
+        if (_customerMobile.text.trim().isNotEmpty) 'customer_mobile': _customerMobile.text.trim(),
+        if (_discountValue > 0) 'discount': {'type': _discountType, 'value': _discountValue},
         if (_note.text.trim().isNotEmpty) 'note': _note.text.trim(),
       };
       final order = await app.api.post(
@@ -596,6 +939,8 @@ class _PosScreenState extends State<PosScreen> {
             'order_type': _orderType,
             'terminal': 'T01',
             'items': items,
+            if (_customerMobile.text.trim().isNotEmpty) 'customer_mobile': _customerMobile.text.trim(),
+            if (_discountValue > 0) 'discount': {'type': _discountType, 'value': _discountValue},
             if (pay) 'tendered': totals.total,
           },
           label: 'POS order ($lineCount lines, ${fmtMoney(totals.total)})',
@@ -639,6 +984,23 @@ class _PosScreenState extends State<PosScreen> {
           if (branch != null) Text(branch, style: const TextStyle(fontSize: 12, color: Brand.accent)),
         ]),
         actions: [
+          Stack(alignment: Alignment.center, children: [
+            IconButton(
+              tooltip: 'Parked orders',
+              icon: const Icon(Icons.pause_presentation),
+              onPressed: _held.isEmpty ? null : _showHeld,
+            ),
+            if (_held.isNotEmpty)
+              Positioned(
+                right: 6,
+                top: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(color: Brand.warning, borderRadius: BorderRadius.circular(10)),
+                  child: Text('${_held.length}', style: const TextStyle(fontSize: 10, color: Colors.white)),
+                ),
+              ),
+          ]),
           IconButton(
             tooltip: _listMode ? 'Show photos' : 'Show list',
             icon: Icon(_listMode ? Icons.grid_view : Icons.view_list),

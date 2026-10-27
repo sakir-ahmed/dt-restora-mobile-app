@@ -44,6 +44,24 @@ extension BrandContext on BuildContext {
   Color get warnFg => isDark ? const Color(0xFFFBBF24) : const Color(0xFF92400E);
 }
 
+/// Accent per module group, mirroring the admin panel's sidebar colours:
+/// Sales blue, Inventory emerald, People violet, Finance amber.
+Color groupColor(BuildContext context, String group) {
+  final dark = context.isDark;
+  switch (group) {
+    case 'Sales':
+      return dark ? Brand.accent : Brand.primary;
+    case 'Inventory':
+      return dark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    case 'People':
+      return dark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+    case 'Finance':
+      return dark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+    default:
+      return dark ? Brand.soft : Brand.slate;
+  }
+}
+
 ThemeData buildTheme(Brightness brightness) {
   final dark = brightness == Brightness.dark;
 

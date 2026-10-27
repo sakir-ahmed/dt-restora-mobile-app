@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../core/api_client.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
 import 'payment_sheet.dart';
@@ -243,7 +245,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: () => guarded(context, _refresh),
-        child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.all(16), children: [
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          // Extra bottom room so the action buttons always clear the
+          // system gesture bar.
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 24 + MediaQuery.paddingOf(context).bottom),
+          children: [
           Row(children: [
             StatusChip(status),
             const SizedBox(width: 8),
@@ -360,7 +367,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 }
 
-/// Kitchen display: active tickets grouped by stage, refreshed regularly.
+/// Kitchen display: live tickets by stage, polled every few seconds with
+/// animated tickets, ticking timers and optimistic stage changes.
 class KitchenScreen extends StatefulWidget {
   const KitchenScreen({super.key});
 
@@ -369,86 +377,457 @@ class KitchenScreen extends StatefulWidget {
 }
 
 class _KitchenScreenState extends State<KitchenScreen> {
-  Timer? _timer;
-  final _keys = {
-    for (final s in ['pending', 'preparing', 'ready']) s: GlobalKey<DataViewState<List<Map<String, dynamic>>>>(),
-  };
+  static const _stages = ['pending', 'preparing', 'ready'];
+  static const _next = {'pending': 'preparing', 'preparing': 'ready', 'ready': 'served'};
+  static const _advanceLabel = {'pending': 'Start preparing', 'preparing': 'Mark ready', 'ready': 'Mark served'};
+
+  final _orders = {for (final s in _stages) s: <Map<String, dynamic>>[]};
+
+  /// Stage a ticket was last rendered in, so the entrance animation only
+  /// plays for genuinely new or moved tickets, not on every poll.
+  final _seenStage = <Object, String>{};
+
+  Timer? _poll;
+  Timer? _ticker;
+  bool _loading = true;
+  bool _offline = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 15), (_) {
-      for (final k in _keys.values) {
-        k.currentState?.reload();
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+    _poll = Timer.periodic(const Duration(seconds: 5), (_) => _refresh(silent: true));
+    // One tick per second keeps the elapsed-time badges counting live.
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
     });
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _poll?.cancel();
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh({bool silent = false}) async {
+    final app = AppScope.read(context);
+    if (!silent && mounted) setState(() => _loading = true);
+    try {
+      final results = await Future.wait([
+        for (final s in _stages)
+          app.cachedGet('/branches/${app.branchId}/orders', query: {'filter[status]': s, 'per_page': 50}),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _offline = results.any((r) => r.fromCache);
+        for (var i = 0; i < _stages.length; i++) {
+          _orders[_stages[i]] = _orderRows(results[i].data).reversed.toList();
+        }
+        _error = null;
+      });
+    } on ApiException catch (e) {
+      if (mounted && !silent) setState(() => _error = e.fullMessage);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Move a ticket to its next stage at once; undo and report if the server refuses.
+  Future<void> _advance(Map<String, dynamic> order, String from, String to) async {
+    final app = AppScope.read(context);
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _orders[from] = _orders[from]!.where((o) => o['id'] != order['id']).toList();
+      order['status'] = to;
+      if (_orders.containsKey(to)) {
+        _orders[to] = [order, ..._orders[to]!];
+      }
+    });
+    final ok = await guarded(context, () async {
+      await app.api.patch('/branches/${app.branchId}/orders/${order['id']}/status', body: {'status': to});
+    });
+    if (!ok && mounted) {
+      setState(() {
+        _orders[to] = _orders[to]!.where((o) => o['id'] != order['id']).toList();
+        order['status'] = from;
+        _orders[from] = [..._orders[from]!, order];
+      });
+    }
+    unawaited(_refresh(silent: true));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final empty = _orders.values.every((l) => l.isEmpty);
+    return DefaultTabController(
+      length: _stages.length,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Kitchen'),
+            const SizedBox(width: 10),
+            _PulseDot(color: _offline ? Brand.warning : Brand.success),
+            const SizedBox(width: 6),
+            Text(_offline ? 'Saved data' : 'Live',
+                style: const TextStyle(fontSize: 12, color: Brand.soft, fontWeight: FontWeight.w600)),
+          ]),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                for (var i = 0; i < _stages.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  _CountBadge(stage: _stages[i], count: _orders[_stages[i]]!.length),
+                ],
+              ]),
+            ),
+          ],
+          bottom: TabBar(
+            labelColor: Colors.white,
+            unselectedLabelColor: Brand.soft,
+            tabs: [for (final s in _stages) Tab(text: titleCase(s))],
+          ),
+        ),
+        body: Column(children: [
+          if (_offline) const OfflineNote(null),
+          Expanded(
+            child: _error != null && empty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: context.muted)),
+                        const SizedBox(height: 16),
+                        OutlinedButton(onPressed: () => _refresh(), child: const Text('Try again')),
+                      ]),
+                    ),
+                  )
+                : _loading && empty
+                    ? const Center(child: CircularProgressIndicator())
+                    : TabBarView(children: [for (final s in _stages) _stage(s)]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _stage(String stage) {
+    final bottomPad = 24 + MediaQuery.paddingOf(context).bottom;
+    final orders = _orders[stage]!;
+    final emptyText = switch (stage) {
+      'pending' => 'No new tickets. Enjoy the calm!',
+      'preparing' => 'Nothing on the stove right now.',
+      _ => 'Nothing waiting to be served.',
+    };
+    if (orders.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: () => _refresh(silent: true),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [SizedBox(height: 160), EmptyState(emptyText)],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: () => _refresh(silent: true),
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(12, 12, 12, bottomPad),
+        itemCount: orders.length,
+        itemBuilder: (context, i) {
+          final o = orders[i];
+          final id = o['id'];
+          final animate = _seenStage[id] != stage;
+          _seenStage[id] = stage;
+          return _KdsTicket(
+            key: ValueKey('kds-$id'),
+            order: o,
+            stage: stage,
+            index: i,
+            animate: animate,
+            onAdvance: () => _advance(o, stage, _next[stage]!),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _KdsTicket extends StatefulWidget {
+  const _KdsTicket({
+    super.key,
+    required this.order,
+    required this.stage,
+    required this.index,
+    required this.animate,
+    required this.onAdvance,
+  });
+
+  final Map<String, dynamic> order;
+  final String stage;
+  final int index;
+  final bool animate;
+  final VoidCallback onAdvance;
+
+  @override
+  State<_KdsTicket> createState() => _KdsTicketState();
+}
+
+class _KdsTicketState extends State<_KdsTicket> with SingleTickerProviderStateMixin {
+  late final AnimationController _enter = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+    value: widget.animate ? 0 : 1,
+  );
+  Timer? _delay;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) {
+      // A short stagger per row so a fresh batch cascades in.
+      _delay = Timer(Duration(milliseconds: widget.index.clamp(0, 6) * 45), () {
+        if (mounted) _enter.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _delay?.cancel();
+    _enter.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    const stages = {'pending': 'preparing', 'preparing': 'ready', 'ready': 'served'};
-    return DefaultTabController(
-      length: stages.length,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Kitchen'),
-          bottom: TabBar(
-            labelColor: Colors.white,
-            unselectedLabelColor: Brand.soft,
-            tabs: [for (final s in stages.keys) Tab(text: titleCase(s))],
+    final o = widget.order;
+    final created = DateTime.tryParse('${o['created_at']}')?.toLocal();
+    final elapsed = created == null ? Duration.zero : DateTime.now().difference(created);
+    final mins = elapsed.inMinutes;
+    final warnAfter = widget.stage == 'preparing' ? 12 : 5;
+    final dangerAfter = widget.stage == 'preparing' ? 22 : 10;
+    final urgency = mins >= dangerAfter ? Brand.danger : mins >= warnAfter ? Brand.warning : Brand.success;
+    final items = asRows(o['items']);
+    final fresh = elapsed.inMinutes < 1;
+
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: _enter, curve: Curves.easeOut),
+      child: SlideTransition(
+        position: Tween(begin: const Offset(0, 0.15), end: Offset.zero)
+            .animate(CurvedAnimation(parent: _enter, curve: Curves.easeOutCubic)),
+        child: ScaleTransition(
+          scale: Tween(begin: 0.97, end: 1.0)
+              .animate(CurvedAnimation(parent: _enter, curve: Curves.easeOutCubic)),
+          child: Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  if (fresh) ...[
+                    _PulseDot(color: Brand.primary, size: 7),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Text('${o['invoice_no']}',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  ),
+                  _TypeChip('${o['order_type']}', table: o['table']),
+                  const SizedBox(width: 6),
+                  _ElapsedBadge(elapsed: elapsed, color: urgency),
+                ]),
+                const SizedBox(height: 10),
+                for (final i in items)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Container(
+                        width: 36,
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: context.brand.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('${i['quantity']}',
+                            style: TextStyle(fontWeight: FontWeight.w800, color: context.brand)),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(localized(app, i), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                          if (asRows(i['add_ons']).isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                '+ ${asRows(i['add_ons']).map((a) => localized(app, a)).join(', ')}',
+                                style: TextStyle(fontSize: 12, color: context.muted),
+                              ),
+                            ),
+                        ]),
+                      ),
+                    ]),
+                  ),
+                const SizedBox(height: 6),
+                Row(children: [
+                  if (o['created_at'] != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Text(fmtDate(o['created_at']), style: TextStyle(fontSize: 11, color: context.muted)),
+                    ),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: widget.onAdvance,
+                      icon: const Icon(Icons.check_circle, size: 18),
+                      label: Text(_KitchenScreenState._advanceLabel[widget.stage]!),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: urgency == Brand.danger ? Brand.danger : null,
+                        minimumSize: const Size.fromHeight(40),
+                      ),
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
           ),
         ),
-        body: TabBarView(children: [
-          for (final entry in stages.entries)
-            DataView<List<Map<String, dynamic>>>(
-              key: _keys[entry.key],
-              path: '/branches/${app.branchId}/orders',
-              query: {'filter[status]': entry.key, 'per_page': 50},
-              transform: _orderRows,
-              builder: (context, rows, raw, reload) => rows.isEmpty
-                  ? ListView(children: const [SizedBox(height: 120), EmptyState('No tickets.')])
-                  : ListView(padding: const EdgeInsets.all(12), children: [
-                      for (final o in rows.reversed)
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Row(children: [
-                                Expanded(child: Text('${o['invoice_no']}', style: const TextStyle(fontWeight: FontWeight.w700))),
-                                Text(titleCase('${o['order_type']}'), style: TextStyle(color: context.muted, fontSize: 12)),
-                              ]),
-                              const SizedBox(height: 6),
-                              for (final i in asRows(o['items']))
-                                Text('${i['quantity']} x ${i['name']}', style: const TextStyle(fontSize: 16)),
-                              const SizedBox(height: 10),
-                              FilledButton(
-                                onPressed: () async {
-                                  final ok = await guarded(context, () async {
-                                    await app.api.patch('/branches/${app.branchId}/orders/${o['id']}/status',
-                                        body: {'status': entry.value});
-                                  });
-                                  if (ok) {
-                                    for (final k in _keys.values) {
-                                      unawaited(k.currentState?.reload());
-                                    }
-                                  }
-                                },
-                                child: Text('Mark ${titleCase(entry.value)}'),
-                              ),
-                            ]),
-                          ),
-                        ),
-                    ]),
-            ),
-        ]),
       ),
+    );
+  }
+}
+
+/// Softly pulsing dot used for the Live badge and fresh tickets.
+class _PulseDot extends StatefulWidget {
+  const _PulseDot({required this.color, this.size = 8});
+
+  final Color color;
+  final double size;
+
+  @override
+  State<_PulseDot> createState() => _PulseDotState();
+}
+
+class _PulseDotState extends State<_PulseDot> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: Tween(begin: 0.6, end: 1.4).animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut)),
+      child: Opacity(
+        opacity: 0.4 + 0.6 * _pulse.value,
+        child: Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
+        ),
+      ),
+    );
+  }
+}
+
+/// Ticket count per stage, shown in the app bar.
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.stage, required this.count});
+
+  final String stage;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (stage) {
+      'pending' => Brand.warning,
+      'preparing' => Brand.accent,
+      _ => Brand.success,
+    };
+    return Container(
+      constraints: const BoxConstraints(minWidth: 22),
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: count == 0 ? Colors.white.withValues(alpha: 0.10) : color,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Text('$count',
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+    );
+  }
+}
+
+/// Order type with icon; shows the table number for dine-in.
+class _TypeChip extends StatelessWidget {
+  const _TypeChip(this.type, {this.table});
+
+  final String type;
+  final Object? table;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (type) {
+      'dine_in' => Icons.restaurant,
+      'takeaway' => Icons.shopping_bag,
+      'delivery' => Icons.delivery_dining,
+      _ => Icons.receipt_outlined,
+    };
+    final label = table != null ? 'Table $table' : titleCase(type);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: context.brand.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 13, color: context.brand),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: context.brand)),
+      ]),
+    );
+  }
+}
+
+/// Time since the order was placed; ticks every second, colored by urgency.
+class _ElapsedBadge extends StatelessWidget {
+  const _ElapsedBadge({required this.elapsed, required this.color});
+
+  final Duration elapsed;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = elapsed.inHours > 0
+        ? '${elapsed.inHours}h ${elapsed.inMinutes % 60}m'
+        : elapsed.inMinutes > 0
+            ? '${elapsed.inMinutes}m ${elapsed.inSeconds % 60}s'
+            : '${elapsed.inSeconds}s';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.timer_outlined, size: 13, color: color),
+        const SizedBox(width: 3),
+        Text(text,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            )),
+      ]),
     );
   }
 }

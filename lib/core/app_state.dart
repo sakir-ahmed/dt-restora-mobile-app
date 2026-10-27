@@ -70,6 +70,11 @@ class AppState extends ChangeNotifier {
   DateTime? lastSyncAt;
   String locale = 'en';
 
+  /// One-time app configuration (setup screen). Falls back to defaults
+  /// until the device has been set up.
+  String appName = 'DT Restora';
+  bool configured = false;
+
   StreamSubscription<List<ConnectivityResult>>? _connectivity;
   StreamSubscription<void>? _unauthSub;
   Timer? _timer;
@@ -101,6 +106,8 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('theme_mode');
     themeMode = ThemeMode.values.where((m) => m.name == saved).firstOrNull ?? ThemeMode.system;
+    appName = prefs.getString('app_name') ?? 'DT Restora';
+    configured = prefs.getBool('app_configured') ?? false;
     await api.restore();
     _unauthSub = api.onUnauthorized.listen((_) => logout(silent: true));
     _connectivity = Connectivity().onConnectivityChanged.listen((results) {
@@ -185,6 +192,18 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Saves the one-time app configuration from the setup screen. The setup
+  /// screen is never shown again until app storage is cleared.
+  Future<void> completeSetup({required String name, required String baseUrl}) async {
+    await api.setBaseUrl(baseUrl);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('app_configured', true);
+    await prefs.setString('app_name', name);
+    appName = name;
+    configured = true;
+    notifyListeners();
+  }
+
   Future<void> switchBranch(int id) async {
     branchId = id;
     await db.putCache('branch_choice', id);
@@ -215,9 +234,23 @@ class AppState extends ChangeNotifier {
 
   // ---------------------------------------------------------------- reads
 
+  static String _cacheKey(String path, Map<String, dynamic>? query) =>
+      'GET:$path?${(query ?? {}).entries.map((e) => '${e.key}=${e.value}').join('&')}';
+
+  /// Last saved response for a GET, without touching the network.
+  Future<Cached<dynamic>?> peekCache(String path, {Map<String, dynamic>? query}) async {
+    final hit = await db.getCache(_cacheKey(path, query));
+    if (hit == null) {
+      return null;
+    }
+    final body = hit.data as Map<String, dynamic>;
+    return Cached(body['data'],
+        fromCache: true, savedAt: hit.savedAt, meta: body['meta'] as Map<String, dynamic>?);
+  }
+
   /// GET with a device-cache fallback so every list works offline.
   Future<Cached<dynamic>> cachedGet(String path, {Map<String, dynamic>? query}) async {
-    final key = 'GET:$path?${(query ?? {}).entries.map((e) => '${e.key}=${e.value}').join('&')}';
+    final key = _cacheKey(path, query);
     try {
       final result = await api.send('GET', path, query: query);
       await db.putCache(key, {'data': result.data, 'meta': result.meta});

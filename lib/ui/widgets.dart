@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../core/api_client.dart';
 import '../core/app_state.dart';
+import '../core/config.dart';
 import '../core/theme.dart';
 
 class AppScope extends InheritedNotifier<AppState> {
@@ -186,15 +187,26 @@ class Metric extends StatelessWidget {
 }
 
 class SectionTitle extends StatelessWidget {
-  const SectionTitle(this.text, {super.key, this.trailing});
+  const SectionTitle(this.text, {super.key, this.trailing, this.color});
 
   final String text;
   final Widget? trailing;
+
+  /// Accent bar shown before the title, e.g. the module group colour.
+  final Color? color;
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
         child: Row(children: [
+          if (color != null) ...[
+            Container(
+              width: 4,
+              height: 16,
+              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(width: 8),
+          ],
           Expanded(
             child: Text(text,
                 style: Theme.of(context)
@@ -219,6 +231,46 @@ class EmptyState extends StatelessWidget {
           child: Text(text, textAlign: TextAlign.center, style: TextStyle(color: context.muted)),
         ),
       );
+}
+
+/// Slim persistent footer shown under every main screen. Gives content a
+/// clear bottom bound and, with its SafeArea, keeps anything from hiding
+/// behind the system gesture bar.
+class AppFooter extends StatelessWidget {
+  const AppFooter({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final year = DateTime.now().year;
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          border: Border(top: BorderSide(color: context.lineColor)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        child: Row(children: [
+          Icon(
+            app.online ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+            size: 13,
+            color: app.online ? Brand.success : Brand.warning,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '© $year ${app.appName}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, color: context.muted),
+            ),
+          ),
+          Text('v${AppConfig.appVersion}', style: TextStyle(fontSize: 10.5, color: context.muted)),
+        ]),
+      ),
+    );
+  }
 }
 
 class OfflineNote extends StatelessWidget {
