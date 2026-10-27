@@ -274,7 +274,6 @@ class _PosScreenState extends State<PosScreen> {
       _reset();
     });
     _persistHeld();
-    _persist();
     SoundFx.play('order_held');
     snack(context, 'Order parked. Resume it from the held list in the app bar.');
   }
@@ -340,8 +339,23 @@ class _PosScreenState extends State<PosScreen> {
                               ),
                               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                                 TextButton(
-                                  onPressed: () {
-                                    Navigator.pop(ctx);
+                                  onPressed: () async {
+                                    // Do not silently throw away a cart
+                                    // that is already being worked on.
+                                    if (_cart.isNotEmpty) {
+                                      final replace = await confirm(
+                                        ctx,
+                                        'Replace the current order?',
+                                        body: 'The items already in the terminal will be cleared.',
+                                        action: 'Replace',
+                                      );
+                                      if (!replace) {
+                                        return;
+                                      }
+                                    }
+                                    if (ctx.mounted) {
+                                      Navigator.pop(ctx);
+                                    }
                                     _resume(t);
                                   },
                                   child: const Text('Resume'),
@@ -869,7 +883,11 @@ class _PosScreenState extends State<PosScreen> {
     }
     setState(() {
       _discountType = type;
-      _discountValue = saved ? (double.tryParse(text) ?? 0) : 0;
+      // Keep the value inside sane bounds so what the cashier sees is what
+      // the server charges: percent within 0-100, fixed within the subtotal.
+      var value = saved ? (double.tryParse(text) ?? 0.0) : 0.0;
+      value = (type == 'percent' ? value.clamp(0.0, 100.0) : value.clamp(0.0, _subtotal)).toDouble();
+      _discountValue = value;
     });
     setSheet(() {});
   }
@@ -899,7 +917,11 @@ class _PosScreenState extends State<PosScreen> {
         'terminal': 'T01',
         'restaurant_table_id': ?(_orderType == 'dine_in' ? _tableId : null),
         if (_customerMobile.text.trim().isNotEmpty) 'customer_mobile': _customerMobile.text.trim(),
-        if (_discountValue > 0) 'discount': {'type': _discountType, 'value': _discountValue},
+        if (_discountValue > 0)
+          'discount': {
+            'type': _discountType,
+            'value': _discountType == 'percent' ? _discountValue.clamp(0, 100) : _discountValue.clamp(0, _subtotal),
+          },
         if (_note.text.trim().isNotEmpty) 'note': _note.text.trim(),
       };
       final order = await app.api.post(
@@ -944,7 +966,11 @@ class _PosScreenState extends State<PosScreen> {
             'terminal': 'T01',
             'items': items,
             if (_customerMobile.text.trim().isNotEmpty) 'customer_mobile': _customerMobile.text.trim(),
-            if (_discountValue > 0) 'discount': {'type': _discountType, 'value': _discountValue},
+            if (_discountValue > 0)
+              'discount': {
+                'type': _discountType,
+                'value': _discountType == 'percent' ? _discountValue.clamp(0, 100) : _discountValue.clamp(0, _subtotal),
+              },
             if (pay) 'tendered': totals.total,
           },
           label: 'POS order ($lineCount lines, ${fmtMoney(totals.total)})',
