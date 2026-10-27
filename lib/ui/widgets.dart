@@ -587,15 +587,16 @@ Future<T?> showForm<T>(
     isScrollControlled: true,
     showDragHandle: true,
     builder: (ctx) => Padding(
-      // Keyboard inset while typing plus the gesture-bar inset when closed,
-      // so a form's last button is never under the screen edge.
+      // Keyboard inset while typing, plus a footer-height gap above the
+      // gesture bar when closed, so a form's last button is always
+      // comfortably tappable.
       padding: EdgeInsets.fromLTRB(
         20,
         0,
         20,
         MediaQuery.of(ctx).viewInsets.bottom +
             MediaQuery.of(ctx).padding.bottom +
-            20,
+            28,
       ),
       child: SingleChildScrollView(
         child: Column(

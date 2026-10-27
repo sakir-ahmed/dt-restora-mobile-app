@@ -960,15 +960,16 @@ class _PosScreenState extends State<PosScreen> {
           final totals = _totals(app);
           final tables = asRows(app.bootstrap?['tables']);
           return Padding(
-            // Keyboard inset while typing, gesture-bar inset when closed, so
-            // the Place order / Pay buttons always stay tappable.
+            // Keyboard inset while typing and a footer-height gap above the
+            // gesture bar when closed, so the Place order / Pay buttons
+            // always stay comfortably tappable.
             padding: EdgeInsets.fromLTRB(
               16,
               0,
               16,
               MediaQuery.of(ctx).viewInsets.bottom +
                   MediaQuery.of(ctx).padding.bottom +
-                  16,
+                  28,
             ),
             child: SingleChildScrollView(
               child: Column(
@@ -1265,7 +1266,7 @@ class _PosScreenState extends State<PosScreen> {
             20,
             MediaQuery.of(ctx).viewInsets.bottom +
                 MediaQuery.of(ctx).padding.bottom +
-                20,
+                28,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,

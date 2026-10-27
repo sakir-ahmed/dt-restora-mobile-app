@@ -62,10 +62,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       child: AnimatedOpacity(
         opacity: _leaving ? 0 : 1,
         duration: const Duration(milliseconds: 320),
-        child: Container(
-          // One calm navy; no gradient, no glow, nothing to distract.
-          color: const Color(0xFF0A1428),
-          child: SafeArea(
+        // Scaffold gives the text a proper Material default style; without
+        // it the name would render with Flutter's yellow debug underline.
+        child: Scaffold(
+          backgroundColor: const Color(0xFF0A1428),
+          body: SafeArea(
             child: Column(children: [
               const Spacer(flex: 5),
               ScaleTransition(
@@ -85,6 +86,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                       fontSize: 25,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.3,
+                      decoration: TextDecoration.none,
                     ),
                   ),
                 ),
@@ -109,7 +111,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   const SizedBox(height: 14),
                   Text(
                     'v${AppConfig.appVersion}',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.45),
+                      fontSize: 11,
+                      decoration: TextDecoration.none,
+                    ),
                   ),
                 ]),
               ),
