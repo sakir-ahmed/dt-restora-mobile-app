@@ -39,8 +39,8 @@ class DtRestoraApp extends StatelessWidget {
         builder: (context, _) => MaterialApp(
           title: state.appName,
           debugShowCheckedModeBanner: false,
-          theme: buildTheme(Brightness.light),
-          darkTheme: buildTheme(Brightness.dark),
+          theme: buildTheme(Brightness.light, brandKey: state.brandKey),
+          darkTheme: buildTheme(Brightness.dark, brandKey: state.brandKey),
           // The device's colour scheme by default, the saved choice once
           // the user picks one in the app bar or drawer.
           themeMode: state.themeMode,

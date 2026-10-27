@@ -20,6 +20,20 @@ class Brand {
   static const Color warning = Color(0xFFD97706);
 }
 
+/// Selectable brand palettes (light primary, dark primary). Blue is the
+/// Datatech default; the rest let each installation pick its identity.
+const brandPalettes = <String, (Color, Color, String)>{
+  'blue': (Color(0xFF0B63CE), Color(0xFF38A8FF), 'Datatech Blue'),
+  'sky': (Color(0xFF0369A1), Color(0xFF38BDF8), 'Sky'),
+  'teal': (Color(0xFF0F766E), Color(0xFF2DD4BF), 'Teal'),
+  'green': (Color(0xFF059669), Color(0xFF34D399), 'Emerald'),
+  'violet': (Color(0xFF7C3AED), Color(0xFFA78BFA), 'Violet'),
+  'orange': (Color(0xFFEA580C), Color(0xFFFB923C), 'Orange'),
+  'rose': (Color(0xFFE11D48), Color(0xFFFB7185), 'Rose'),
+};
+
+(Color, Color, String) brandColors(String key) => brandPalettes[key] ?? brandPalettes['blue']!;
+
 /// Colors that change between the light and dark themes. Use these in
 /// widgets instead of the fixed [Brand] constants.
 extension BrandContext on BuildContext {
@@ -37,7 +51,7 @@ extension BrandContext on BuildContext {
   Color get lineColor => isDark ? Brand.darkBorder : Brand.border;
 
   /// Brand blue; lighter in dark mode so it stays readable.
-  Color get brand => isDark ? Brand.accent : Brand.primary;
+  Color get brand => Theme.of(this).colorScheme.primary;
 
   /// Soft tinted background for notices, e.g. the offline banner.
   Color get warnBg => Brand.warning.withValues(alpha: isDark ? 0.18 : 0.12);
@@ -45,12 +59,12 @@ extension BrandContext on BuildContext {
 }
 
 /// Accent per module group, mirroring the admin panel's sidebar colours:
-/// Sales blue, Inventory emerald, People violet, Finance amber.
+/// Sales follows the brand, Inventory emerald, People violet, Finance amber.
 Color groupColor(BuildContext context, String group) {
   final dark = context.isDark;
   switch (group) {
     case 'Sales':
-      return dark ? Brand.accent : Brand.primary;
+      return context.brand;
     case 'Inventory':
       return dark ? const Color(0xFF34D399) : const Color(0xFF059669);
     case 'People':
@@ -62,31 +76,35 @@ Color groupColor(BuildContext context, String group) {
   }
 }
 
-ThemeData buildTheme(Brightness brightness) {
+ThemeData buildTheme(Brightness brightness, {String brandKey = 'blue'}) {
   final dark = brightness == Brightness.dark;
+  final (brandLight, brandDark, _) = brandColors(brandKey);
+  final brandPrimary = dark ? brandDark : brandLight;
+  final brandOnPrimary = dark ? Brand.navy : Colors.white;
+  final brandContainer = dark ? brandDark.withValues(alpha: 0.24) : brandLight.withValues(alpha: 0.14);
 
   final scheme = dark
-      ? const ColorScheme.dark(
-          primary: Brand.accent,
-          onPrimary: Brand.navy,
-          secondary: Brand.accent,
-          onSecondary: Brand.navy,
+      ? ColorScheme.dark(
+          primary: brandPrimary,
+          onPrimary: brandOnPrimary,
+          secondary: brandDark,
+          onSecondary: brandOnPrimary,
           surface: Brand.darkSurface,
           onSurface: Brand.cloud,
           onSurfaceVariant: Brand.soft,
           outline: Brand.darkBorder,
           outlineVariant: Brand.darkBorder,
-          error: Color(0xFFFB7185),
-          primaryContainer: Color(0xFF1B3C6E),
+          error: const Color(0xFFFB7185),
+          primaryContainer: brandContainer,
           onPrimaryContainer: Brand.cloud,
-          secondaryContainer: Color(0xFF1B3C6E),
+          secondaryContainer: brandContainer,
           onSecondaryContainer: Brand.cloud,
-          surfaceContainerHighest: Color(0xFF16264A),
+          surfaceContainerHighest: const Color(0xFF16264A),
         )
-      : const ColorScheme.light(
-          primary: Brand.primary,
+      : ColorScheme.light(
+          primary: brandLight,
           onPrimary: Colors.white,
-          secondary: Brand.accent,
+          secondary: brandDark,
           onSecondary: Brand.navy,
           surface: Colors.white,
           onSurface: Brand.navy,
@@ -94,11 +112,11 @@ ThemeData buildTheme(Brightness brightness) {
           outline: Brand.border,
           outlineVariant: Brand.border,
           error: Brand.danger,
-          primaryContainer: Color(0xFFDCEAFB),
+          primaryContainer: brandContainer,
           onPrimaryContainer: Brand.navy,
-          secondaryContainer: Color(0xFFDCEAFB),
-          onSecondaryContainer: Brand.primary,
-          surfaceContainerHighest: Color(0xFFEAF0F8),
+          secondaryContainer: brandContainer,
+          onSecondaryContainer: brandLight,
+          surfaceContainerHighest: const Color(0xFFEAF0F8),
         );
 
   final bg = dark ? Brand.navy : Brand.cloud;

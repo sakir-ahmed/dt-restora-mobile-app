@@ -561,7 +561,7 @@ class _PosScreenState extends State<PosScreen> {
                   child: Container(
                     constraints: const BoxConstraints(minWidth: 18),
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                    decoration: BoxDecoration(color: Brand.primary, borderRadius: BorderRadius.circular(9)),
+                    decoration: BoxDecoration(color: context.brand, borderRadius: BorderRadius.circular(9)),
                     child: Text('${f.qty}', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 10)),
                   ),
                 ),

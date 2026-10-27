@@ -219,15 +219,16 @@ class _HomeAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final height = 72.0;
     if (primary) {
+      final (c1, c2, _) = brandColors(AppScope.of(context).brandKey);
       return Material(
         color: Colors.transparent,
         child: Ink(
           height: height,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [Brand.primary, Brand.accent]),
+            gradient: LinearGradient(colors: [c1, c2]),
             borderRadius: BorderRadius.circular(18),
             boxShadow: [
-              BoxShadow(color: Brand.primary.withValues(alpha: 0.30), blurRadius: 14, offset: const Offset(0, 5)),
+              BoxShadow(color: c1.withValues(alpha: 0.30), blurRadius: 14, offset: const Offset(0, 5)),
             ],
           ),
           child: InkWell(

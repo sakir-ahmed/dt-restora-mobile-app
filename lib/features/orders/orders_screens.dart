@@ -690,7 +690,7 @@ class _KdsTicketState extends State<_KdsTicket> with SingleTickerProviderStateMi
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   if (fresh) ...[
-                    _PulseDot(color: Brand.primary, size: 7),
+                    _PulseDot(color: context.brand, size: 7),
                     const SizedBox(width: 6),
                   ],
                   Expanded(
@@ -809,7 +809,7 @@ class _CountBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = switch (stage) {
       'pending' => Brand.warning,
-      'preparing' => Brand.accent,
+      'preparing' => context.brand,
       _ => Brand.success,
     };
     return Container(

@@ -27,11 +27,11 @@ class AppDrawer extends StatelessWidget {
           // Brand header, like the admin sidebar's top strip.
           Container(
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF0A1428), Color(0xFF0B63CE)],
+                colors: [const Color(0xFF0A1428), brandColors(app.brandKey).$1],
               ),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

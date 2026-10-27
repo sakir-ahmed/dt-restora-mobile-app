@@ -1,15 +1,47 @@
 import 'package:flutter/material.dart';
 
+import '../../core/app_state.dart';
 import '../../core/config.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
+import '../splash/splash_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  Future<void> _pickBranch(BuildContext context) async {
-    final app = AppScope.read(context);
+  /// Edit the API server from settings, the same form as the login screen.
+  Future<void> _editServer(BuildContext context, AppState app) async {
+    final c = TextEditingController(text: app.api.baseUrl);
+    final go = await showForm<bool>(
+      context,
+      title: 'Server address',
+      builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        field(c, 'API base URL', type: TextInputType.url),
+        Text(
+          'Emulator: http://10.0.2.2:8000/api/v1. A phone on the same Wi-Fi: http://<computer-ip>:8000/api/v1.',
+          style: TextStyle(color: ctx.muted, fontSize: 12),
+        ),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: () async {
+            await app.api.setBaseUrl(c.text);
+            if (ctx.mounted) {
+              Navigator.pop(ctx, true);
+            }
+          },
+          child: const Text('Save'),
+        ),
+      ]),
+    );
+    final text = c.text;
+    c.dispose();
+    if (go == true && context.mounted) {
+      snack(context, text.startsWith('http') ? 'Server saved: $text' : 'Server not changed.');
+    }
+  }
+
+  Future<void> _pickBranch(BuildContext context) async {    final app = AppScope.read(context);
     final res = await app.cachedGet('/customer/branches');
     if (!context.mounted) {
       return;
@@ -130,10 +162,22 @@ class SettingsScreen extends StatelessWidget {
                   },
                 ),
                 const _SoundsTile(),
+                _BrandingTile(
+                  onPreviewSplash: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => Scaffold(
+                        body: SplashScreen(onDone: () => Navigator.of(context).pop()),
+                      ),
+                    ),
+                  ),
+                ),
                 ListTile(
                   leading: const Icon(Icons.dns),
                   title: const Text('Server'),
                   subtitle: Text(app.api.baseUrl),
+                  trailing: const Icon(Icons.edit_outlined, size: 18),
+                  onTap: () => _editServer(context, app),
                 ),
                 const ListTile(
                   leading: Icon(Icons.info_outline),
@@ -169,6 +213,142 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Branding: rename the app, pick the brand colour that themes the whole
+/// app and the splash screen, and preview the splash.
+class _BrandingTile extends StatelessWidget {
+  const _BrandingTile({required this.onPreviewSplash});
+
+  final VoidCallback onPreviewSplash;
+
+  Future<void> _rename(BuildContext context, AppState app) async {
+    final c = TextEditingController(text: app.appName);
+    final go = await showForm<bool>(
+      context,
+      title: 'App name',
+      builder: (ctx) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        field(c, 'Shown on the splash screen and headers'),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+      ]),
+    );
+    final name = c.text;
+    c.dispose();
+    if (go == true && name.trim().isNotEmpty) {
+      await app.setAppName(name);
+      if (context.mounted) {
+        snack(context, 'App renamed to ${app.appName}.');
+      }
+    }
+  }
+
+  Future<void> _pickColor(BuildContext context, AppState app) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Brand colour', style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text('Applies to buttons, tiles, charts and the splash screen.',
+                style: TextStyle(color: ctx.muted, fontSize: 12)),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final e in brandPalettes.entries)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(36),
+                    onTap: () {
+                      app.setBrand(e.key);
+                      Navigator.pop(ctx);
+                    },
+                    child: Container(
+                      width: 72,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: e.value.$1.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: app.brandKey == e.key ? e.value.$1 : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                      child: Column(children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [e.value.$1, e.value.$2],
+                            ),
+                          ),
+                          child: app.brandKey == e.key
+                              ? const Icon(Icons.check, color: Colors.white, size: 20)
+                              : null,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(e.value.$3, style: const TextStyle(fontSize: 11)),
+                      ]),
+                    ),
+                  ),
+              ],
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final (_, brandDark, name) = brandColors(app.brandKey);
+    return Column(children: [
+      ListTile(
+        leading: CircleAvatar(
+          backgroundColor: brandDark.withValues(alpha: 0.15),
+          child: Text(
+            app.appName.isEmpty ? '?' : app.appName[0].toUpperCase(),
+            style: TextStyle(color: context.brand, fontWeight: FontWeight.w800),
+          ),
+        ),
+        title: const Text('App name'),
+        subtitle: Text(app.appName),
+        trailing: const Icon(Icons.edit_outlined, size: 18),
+        onTap: () => _rename(context, app),
+      ),
+      ListTile(
+        leading: CircleAvatar(
+          backgroundColor: context.brand.withValues(alpha: 0.15),
+          child: Icon(Icons.palette_outlined, color: context.brand),
+        ),
+        title: const Text('Brand colour'),
+        subtitle: Text(name),
+        trailing: Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(colors: [context.brand, brandDark]),
+          ),
+        ),
+        onTap: () => _pickColor(context, app),
+      ),
+      ListTile(
+        leading: Icon(Icons.play_circle_outline, color: context.brand),
+        title: const Text('Preview splash screen'),
+        subtitle: Text('See the splash with this name and colour'),
+        onTap: onPreviewSplash,
+      ),
+    ]);
   }
 }
 

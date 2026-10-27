@@ -75,6 +75,9 @@ class AppState extends ChangeNotifier {
   String appName = 'DT Restora';
   bool configured = false;
 
+  /// Selected brand palette key (see theme.dart); blue is the default.
+  String brandKey = 'blue';
+
   StreamSubscription<List<ConnectivityResult>>? _connectivity;
   StreamSubscription<void>? _unauthSub;
   Timer? _timer;
@@ -108,6 +111,7 @@ class AppState extends ChangeNotifier {
     themeMode = ThemeMode.values.where((m) => m.name == saved).firstOrNull ?? ThemeMode.system;
     appName = prefs.getString('app_name') ?? 'DT Restora';
     configured = prefs.getBool('app_configured') ?? false;
+    brandKey = prefs.getString('brand_key') ?? 'blue';
     await api.restore();
     _unauthSub = api.onUnauthorized.listen((_) => logout(silent: true));
     _connectivity = Connectivity().onConnectivityChanged.listen((results) {
@@ -202,6 +206,27 @@ class AppState extends ChangeNotifier {
     appName = name;
     configured = true;
     notifyListeners();
+  }
+
+  /// Renames the app from Settings; shown on the splash screen, app bar,
+  /// drawer and footer.
+  Future<void> setAppName(String name) async {
+    final clean = name.trim();
+    if (clean.isEmpty) {
+      return;
+    }
+    appName = clean;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('app_name', clean);
+  }
+
+  /// Switches the brand palette; applied to the theme at once.
+  Future<void> setBrand(String key) async {
+    brandKey = key;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('brand_key', key);
   }
 
   Future<void> switchBranch(int id) async {

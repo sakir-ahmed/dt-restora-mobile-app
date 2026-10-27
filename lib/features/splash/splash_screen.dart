@@ -51,6 +51,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
+    final (_, brandDark, _) = brandColors(app.brandKey);
     final logoFade = CurvedAnimation(parent: _c, curve: const Interval(0, 0.28, curve: Curves.easeOut));
     final logoScale = CurvedAnimation(parent: _c, curve: const Interval(0, 0.45, curve: Curves.easeOutBack));
     final nameFade = CurvedAnimation(parent: _c, curve: const Interval(0.22, 0.5, curve: Curves.easeOut));
@@ -63,11 +64,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         opacity: _leaving ? 0 : 1,
         duration: const Duration(milliseconds: 350),
         child: Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Color(0xFF081020), Color(0xFF0A1428), Color(0xFF0B63CE)],
+              colors: [const Color(0xFF081020), const Color(0xFF0A1428), brandDark],
             ),
           ),
           child: SafeArea(
@@ -85,7 +86,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                       borderRadius: BorderRadius.circular(28),
                       boxShadow: [
                         BoxShadow(
-                          color: Brand.accent.withValues(alpha: 0.45),
+                          color: brandDark.withValues(alpha: 0.45),
                           blurRadius: 40,
                           spreadRadius: 2,
                         ),
@@ -128,10 +129,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               const Spacer(flex: 6),
               FadeTransition(
                 opacity: progressFade,
-                child: const SizedBox(
+                child: SizedBox(
                   width: 26,
                   height: 26,
-                  child: CircularProgressIndicator(color: Brand.accent, strokeWidth: 2.4),
+                  child: CircularProgressIndicator(color: brandDark, strokeWidth: 2.4),
                 ),
               ),
               const SizedBox(height: 34),

@@ -224,10 +224,13 @@ class _MonthBarChart extends StatelessWidget {
                                           ? null
                                           : context.brand.withValues(alpha: 0.30),
                                       gradient: i == data.length - 1
-                                          ? const LinearGradient(
+                                          ? LinearGradient(
                                               begin: Alignment.bottomCenter,
                                               end: Alignment.topCenter,
-                                              colors: [Brand.primary, Brand.accent],
+                                              colors: [
+                                                brandColors(AppScope.of(context).brandKey).$1,
+                                                brandColors(AppScope.of(context).brandKey).$2,
+                                              ],
                                             )
                                           : null,
                                       borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
