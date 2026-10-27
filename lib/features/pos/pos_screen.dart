@@ -1545,18 +1545,13 @@ class _PosScreenState extends State<PosScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_count > 0)
-            _CartBar(
+      bottomNavigationBar: _count == 0
+          ? null
+          : _CartBar(
               count: _count,
               total: _totals(app).total,
               onTap: () => _openCart(app),
             ),
-          const AppFooter(),
-        ],
-      ),
       body: cats.isEmpty
           ? const EmptyState(
               'The menu has not been downloaded yet. Connect once to load it.',

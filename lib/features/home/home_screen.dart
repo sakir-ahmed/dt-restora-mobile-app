@@ -96,7 +96,6 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      bottomNavigationBar: const AppFooter(),
       body: Column(children: [
         if (!app.online)
           Container(

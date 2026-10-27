@@ -36,49 +36,68 @@ class DtRestoraApp extends StatelessWidget {
       state: state,
       child: ListenableBuilder(
         listenable: state,
-        builder: (context, _) => MaterialApp(
-          title: state.appName,
-          debugShowCheckedModeBanner: false,
-          theme: buildTheme(Brightness.light, brandKey: state.brandKey),
-          darkTheme: buildTheme(Brightness.dark, brandKey: state.brandKey),
-          // The device's colour scheme by default, the saved choice once
-          // the user picks one in the app bar or drawer.
-          themeMode: state.themeMode,
-          home: const _Root(),
-        ),
+        builder: (context, _) => const _AppShell(),
       ),
     );
   }
 }
 
-class _Root extends StatefulWidget {
-  const _Root();
+/// The app shell: every page and every bottom popup lives above one
+/// permanent footer, and the splash overlays the whole thing.
+class _AppShell extends StatefulWidget {
+  const _AppShell();
 
   @override
-  State<_Root> createState() => _RootState();
+  State<_AppShell> createState() => _AppShellState();
 }
 
-class _RootState extends State<_Root> {
+class _AppShellState extends State<_AppShell> {
   bool _splashDone = false;
 
   @override
   Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    return Stack(children: [
+      MaterialApp(
+        title: state.appName,
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(Brightness.light, brandKey: state.brandKey),
+        darkTheme: buildTheme(Brightness.dark, brandKey: state.brandKey),
+        // The device's colour scheme by default, the saved choice once
+        // the user picks one in the app bar or drawer.
+        themeMode: state.themeMode,
+        home: const _Root(),
+        // The footer sits below the navigator, so screens, drawers and
+        // bottom sheets all stop above it — nothing can hide behind the
+        // screen edge anywhere in the app.
+        builder: (context, child) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: child ?? const SizedBox.shrink()),
+            const AppFooter(),
+          ],
+        ),
+      ),
+      if (!_splashDone)
+        Positioned.fill(
+          child: SplashScreen(onDone: () => setState(() => _splashDone = true)),
+        ),
+    ]);
+  }
+}
+
+class _Root extends StatelessWidget {
+  const _Root();
+
+  @override
+  Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final Widget page;
-    if (!app.configured) {
-      page = const SetupScreen();
-    } else {
-      page = app.isLoggedIn ? const HomeScreen() : const LoginScreen();
-    }
-    return _ConfirmExit(
-      child: Stack(children: [
-        Positioned.fill(child: page),
-        if (!_splashDone)
-          Positioned.fill(
-            child: SplashScreen(onDone: () => setState(() => _splashDone = true)),
-          ),
-      ]),
-    );
+    final page = !app.configured
+        ? const SetupScreen()
+        : app.isLoggedIn
+            ? const HomeScreen()
+            : const LoginScreen();
+    return _ConfirmExit(child: page);
   }
 }
 
