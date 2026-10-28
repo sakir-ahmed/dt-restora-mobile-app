@@ -1453,7 +1453,7 @@ class _PosScreenState extends State<PosScreen> {
             .toStringAsFixed(2),
         'add_ons': [
           for (final a in l.addOns)
-            {'id': a['id'], 'name': a['name'], 'price': a['price'], 'qty': 1},
+            {'id': a['id'], 'name': a['name'], 'name_bn': a['name_bn'], 'price': a['price'], 'qty': 1},
         ],
         'line_total': l.total.toStringAsFixed(2),
       },

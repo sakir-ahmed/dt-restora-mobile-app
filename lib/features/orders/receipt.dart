@@ -6,6 +6,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../../core/local_db.dart';
+import '../../core/pdf_fonts.dart';
+import '../../core/pdf_shaper.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
 import '../pos/pos_screen.dart';
@@ -31,10 +33,16 @@ String _money(Object? v) => toNum(v).toStringAsFixed(2);
 /// business, branch, invoice, date, table and cashier, items, totals,
 /// payments, change and the footer message.
 class ReceiptData {
-  ReceiptData(this.order, this.branch);
+  ReceiptData(this.order, this.branch, {this.bangla = false});
 
   final Map<String, dynamic> order;
   final Map<String, dynamic> branch;
+
+  /// Print item names in Bangla where the menu has them.
+  final bool bangla;
+
+  String name(Map<String, dynamic> m) =>
+      bangla && (m['name_bn'] ?? '').toString().isNotEmpty ? '${m['name_bn']}' : '${m['name']}';
 
   String get invoice => '${order['invoice_no']}';
 
@@ -94,19 +102,26 @@ class ReceiptData {
       : 'Thank you. Please come again.';
 
   Future<Uint8List> toPdf() async {
-    final doc = pw.Document();
+    final doc = pw.Document(theme: await PdfFonts.theme());
+    // Bangla is drawn by Flutter's text engine, which shapes it correctly.
+    const textWidth = 70 * PdfPageFormat.mm;
+    final shaper = PdfShaper();
+    final branchName = '${branch['name'] ?? ''}';
+    await shaper.prepare(branchName, 10, maxWidth: textWidth);
+    await shaper.prepare('${branch['address'] ?? ''}', 8, maxWidth: textWidth);
+    await shaper.prepare(footer, 8, maxWidth: textWidth);
+    for (final i in items) {
+      await shaper.prepare(name(i), 9, maxWidth: textWidth);
+      for (final a in asRows(i['add_ons'])) {
+        await shaper.prepare('    + ${name(a)}', 9, maxWidth: textWidth);
+      }
+    }
     pw.Widget pair(ReceiptRow r) => pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 1),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.Text(
-            r.left,
-            style: pw.TextStyle(
-              fontSize: 9,
-              fontWeight: r.bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-            ),
-          ),
+          shaper.text(r.left, 9, bold: r.bold, maxWidth: textWidth),
           if (r.right != null)
             pw.Text(
               r.right!,
@@ -140,18 +155,11 @@ class ReceiptData {
               ),
             ),
             pw.Center(
-              child: pw.Text(
-                '${branch['name'] ?? ''}',
-                style: const pw.TextStyle(fontSize: 10),
-              ),
+              child: shaper.text(branchName, 10, maxWidth: textWidth),
             ),
             if (branch['address'] != null)
               pw.Center(
-                child: pw.Text(
-                  '${branch['address']}',
-                  style: const pw.TextStyle(fontSize: 8),
-                  textAlign: pw.TextAlign.center,
-                ),
+                child: shaper.text('${branch['address']}', 8, maxWidth: textWidth, align: pw.TextAlign.center),
               ),
             if (branch['phone'] != null)
               pw.Center(
@@ -164,7 +172,7 @@ class ReceiptData {
             for (final r in headerRows()) pair(r),
             line,
             for (final i in items) ...[
-              pw.Text('${i['name']}', style: const pw.TextStyle(fontSize: 9)),
+              shaper.text(name(i), 9, maxWidth: textWidth),
               pair(
                 ReceiptRow(
                   '  ${i['quantity']} x ${_money(i['unit_price'] ?? toNum(i['line_total']) / (toNum(i['quantity']) == 0 ? 1 : toNum(i['quantity'])))}',
@@ -172,7 +180,7 @@ class ReceiptData {
                 ),
               ),
               for (final a in asRows(i['add_ons']))
-                pair(ReceiptRow('    + ${a['name']}', _money(a['price']))),
+                pair(ReceiptRow('    + ${name(a)}', _money(a['price']))),
             ],
             line,
             for (final r in totalRows()) pair(r),
@@ -180,11 +188,7 @@ class ReceiptData {
             for (final r in paymentRows()) pair(r),
             line,
             pw.Center(
-              child: pw.Text(
-                footer,
-                style: const pw.TextStyle(fontSize: 8),
-                textAlign: pw.TextAlign.center,
-              ),
+              child: shaper.text(footer, 8, maxWidth: textWidth, align: pw.TextAlign.center),
             ),
           ],
         ),
@@ -197,9 +201,13 @@ class ReceiptData {
 /// The kitchen ticket: a big token number, what to cook and any note. Built
 /// from the order alone, so it prints with no network.
 class KitchenTokenData {
-  KitchenTokenData(this.order);
+  KitchenTokenData(this.order, {this.bangla = false});
 
   final Map<String, dynamic> order;
+  final bool bangla;
+
+  String name(Map<String, dynamic> m) =>
+      bangla && (m['name_bn'] ?? '').toString().isNotEmpty ? '${m['name_bn']}' : '${m['name']}';
 
   String get invoice => '${order['invoice_no']}';
 
@@ -221,7 +229,27 @@ class KitchenTokenData {
   List<Map<String, dynamic>> get items => asRows(order['items']);
 
   Future<Uint8List> toPdf() async {
-    final doc = pw.Document();
+    final doc = pw.Document(theme: await PdfFonts.theme());
+    // Bangla is drawn by Flutter's text engine, which shapes it correctly.
+    const textWidth = 52 * PdfPageFormat.mm;
+    final shaper = PdfShaper();
+    for (final i in items) {
+      await shaper.prepare(
+        '${i['quantity']} x ${name(i)}',
+        11,
+        bold: true,
+        maxWidth: textWidth,
+      );
+      for (final a in asRows(i['add_ons'])) {
+        await shaper.prepare(
+          '+ ${a['qty'] ?? 1} x ${name(a)}',
+          9,
+          maxWidth: textWidth - 8,
+        );
+      }
+    }
+    final note = '${order['note'] ?? ''}';
+    await shaper.prepare(note, 9, maxWidth: textWidth);
     final line = pw.Divider(
       thickness: 1,
       height: 10,
@@ -272,28 +300,16 @@ class KitchenTokenData {
             ),
             line,
             for (final i in items) ...[
-              pw.Text(
-                '${i['quantity']} x ${i['name']}',
-                style: pw.TextStyle(
-                  fontSize: 11,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
+              shaper.text('${i['quantity']} x ${name(i)}', 11, bold: true, maxWidth: textWidth),
               for (final a in asRows(i['add_ons']))
                 pw.Padding(
                   padding: const pw.EdgeInsets.only(left: 8),
-                  child: pw.Text(
-                    '+ ${a['qty'] ?? 1} x ${a['name']}',
-                    style: const pw.TextStyle(fontSize: 9),
-                  ),
+                  child: shaper.text('+ ${a['qty'] ?? 1} x ${name(a)}', 9, maxWidth: textWidth - 8),
                 ),
             ],
             if ((order['note'] ?? '').toString().isNotEmpty) ...[
               line,
-              pw.Text(
-                '${order['note']}',
-                style: const pw.TextStyle(fontSize: 9),
-              ),
+              shaper.text(note, 9, maxWidth: textWidth),
             ],
             line,
           ],
@@ -426,8 +442,9 @@ class _ReceiptBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final data = ReceiptData(order, branch);
-    final kitchen = KitchenTokenData(order);
+    final bangla = AppScope.of(context).locale == 'bn';
+    final data = ReceiptData(order, branch, bangla: bangla);
+    final kitchen = KitchenTokenData(order, bangla: bangla);
 
     Future<void> printPdf(
       Future<Uint8List> Function() build,
@@ -632,7 +649,7 @@ class _Paper extends StatelessWidget {
           for (final r in data.headerRows()) pair(r),
           rule,
           for (final i in data.items) ...[
-            Text('${i['name']}', style: mono),
+            Text(data.name(i), style: mono),
             pair(
               ReceiptRow(
                 '  ${i['quantity']} x ${_money(i['unit_price'] ?? toNum(i['line_total']) / (toNum(i['quantity']) == 0 ? 1 : toNum(i['quantity'])))}',
@@ -640,7 +657,7 @@ class _Paper extends StatelessWidget {
               ),
             ),
             for (final a in asRows(i['add_ons']))
-              pair(ReceiptRow('    + ${a['name']}', _money(a['price']))),
+              pair(ReceiptRow('    + ${data.name(a)}', _money(a['price']))),
           ],
           rule,
           for (final r in data.totalRows()) pair(r),

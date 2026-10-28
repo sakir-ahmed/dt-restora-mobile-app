@@ -1,0 +1,3 @@
+Noto Sans and Noto Sans Bengali are licensed under the SIL Open Font License 1.1
+(https://openfontlicense.org). They are bundled so receipts and kitchen tokens can be
+printed in English and Bangla with no network.

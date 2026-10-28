@@ -46,6 +46,7 @@ dependencies:
   cached_network_image: ^4.0.5
   wakelock_plus: ^1.4.0
   audioplayers: ^6.4.0
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
@@ -67,6 +68,7 @@ flutter:
 
   assets:
     - assets/brand/
+    - assets/fonts/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

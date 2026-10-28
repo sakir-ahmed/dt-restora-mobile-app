@@ -3,6 +3,8 @@ import 'package:dt_restora/features/orders/receipt.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   final order = <String, dynamic>{
     'invoice_no': 'BR01-T01-20261028-200424-GAME',
     'token_no': 'T01-007',
@@ -39,6 +41,19 @@ void main() {
   test('kitchen ticket and receipt render to PDF without a network', () async {
     expect((await KitchenTokenData(order).toPdf()).isNotEmpty, isTrue);
     expect((await ReceiptData(order, const {'name': 'Gulshan'}).toPdf()).isNotEmpty, isTrue);
+  });
+
+  test('prints Bangla item names in the PDF with the bundled font', () async {
+    final bn = {
+      ...order,
+      'items': [
+        {...(order['items'] as List).first as Map<String, dynamic>, 'name_bn': 'বিফ তেহারি'},
+      ],
+    };
+
+    expect(KitchenTokenData(bn, bangla: true).name((bn['items'] as List).first as Map<String, dynamic>), 'বিফ তেহারি');
+    expect((await KitchenTokenData(bn, bangla: true).toPdf()).isNotEmpty, isTrue);
+    expect((await ReceiptData(bn, const {}, bangla: true).toPdf()).isNotEmpty, isTrue);
   });
 
   test('receipt shows cash and change for a paid offline sale', () {
