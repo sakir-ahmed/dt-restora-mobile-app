@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../../core/api_client.dart';
 import '../../core/theme.dart';
 import '../../ui/food_image.dart';
 import '../../ui/widgets.dart';
+import 'pos_settings_screen.dart';
 import 'record_form.dart';
 
 Future<void> _openForm(
@@ -372,6 +374,71 @@ class MediaScreen extends StatefulWidget {
 class _MediaScreenState extends State<MediaScreen> {
   final _key = GlobalKey<DataViewState<Map<String, dynamic>>>();
   String? _owner;
+  String? _currentOwner;
+
+  /// Choose between photos from the gallery and a video link.
+  Future<void> _addMedia() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Photos from this device'),
+            onTap: () => Navigator.pop(ctx, 'photos'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.video_library_outlined),
+            title: const Text('Video link'),
+            onTap: () => Navigator.pop(ctx, 'video'),
+          ),
+        ]),
+      ),
+    );
+    if (!mounted || choice == null) {
+      return;
+    }
+    if (choice == 'photos') {
+      await _uploadPhotos();
+    } else {
+      await showForm<void>(
+        context,
+        title: 'Add video link',
+        builder: (_) => RecordForm(
+          fields: const [
+            FieldSpec('video_url', 'YouTube or Vimeo link', required: true, hint: 'https://'),
+            FieldSpec('title', 'Title'),
+          ],
+          path: '/media/videos',
+          extraBody: {'owner': _owner ?? 'general'},
+          savedMessage: 'Video added.',
+        ),
+      );
+    }
+    await _key.currentState?.reload();
+  }
+
+  Future<void> _uploadPhotos() async {
+    final app = AppScope.read(context);
+    final picked = await ImagePicker().pickMultiImage(limit: 10, maxWidth: 2000, imageQuality: 85);
+    if (picked.isEmpty || !mounted) {
+      return;
+    }
+    snack(context, 'Uploading ${picked.length} photo(s)...');
+    final owner = _owner ?? (_currentOwner ?? 'general');
+    final ok = await guarded(context, () async {
+      await app.api.upload(
+        '/media/images',
+        fields: {'owner': owner},
+        fileField: 'images[]',
+        filePaths: [for (final p in picked) p.path],
+      );
+    });
+    if (ok && mounted) {
+      snack(context, '${picked.length} photo(s) added.');
+    }
+  }
 
   Future<void> _call(String method, String path, [Map<String, dynamic>? body]) async {
     final app = AppScope.read(context);
@@ -397,24 +464,9 @@ class _MediaScreenState extends State<MediaScreen> {
       appBar: AppBar(title: const Text('Media')),
       floatingActionButton: canManage
           ? FloatingActionButton.extended(
-              onPressed: () async {
-                await showForm<void>(
-                  context,
-                  title: 'Add video link',
-                  builder: (_) => RecordForm(
-                    fields: const [
-                      FieldSpec('video_url', 'YouTube or Vimeo link', required: true, hint: 'https://'),
-                      FieldSpec('title', 'Title'),
-                    ],
-                    path: '/media/videos',
-                    extraBody: {'owner': _owner ?? 'general'},
-                    savedMessage: 'Video added.',
-                  ),
-                );
-                await _key.currentState?.reload();
-              },
-              icon: const Icon(Icons.video_library_outlined),
-              label: const Text('Video'),
+              onPressed: _addMedia,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: const Text('Add'),
             )
           : null,
       body: DataView<Map<String, dynamic>>(
@@ -426,6 +478,7 @@ class _MediaScreenState extends State<MediaScreen> {
           final media = asRows(data['media']);
           final branches = asRows(data['branches']);
           final owner = _owner ?? '${data['owner']}';
+          _currentOwner = owner;
           return ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
@@ -557,7 +610,21 @@ class BranchesScreen extends StatelessWidget {
             '${(b['city'] ?? '').toString().isEmpty ? '' : '${b['city']}  -  '}'
             'VAT ${b['vat_percent']}%  -  Service ${b['service_charge_percent']}%',
           ),
-          trailing: b['is_active'] == false ? const StatusChip('inactive') : null,
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (b['is_active'] == false) const StatusChip('inactive'),
+            if (canManage)
+              IconButton(
+                tooltip: 'POS settings',
+                icon: const Icon(Icons.tune),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => PosSettingsScreen(branch: b)),
+                  );
+                  await reload();
+                },
+              ),
+          ]),
           onTap: canManage
               ? () => _openForm(
                     context,

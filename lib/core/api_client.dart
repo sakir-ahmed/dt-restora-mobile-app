@@ -118,6 +118,25 @@ class ApiClient {
 
   Future<dynamic> delete(String path) async => (await send('DELETE', path)).data;
 
+  /// Sends files as a multipart form, e.g. photos for the media gallery.
+  /// [files] maps a form field name such as `images[]` to local paths.
+  Future<dynamic> upload(String path, {Map<String, String> fields = const {}, required String fileField, required List<String> filePaths}) async {
+    final request = http.MultipartRequest('POST', _uri(path, null))
+      ..headers.addAll({..._headers()}..remove('Content-Type'))
+      ..fields.addAll(fields);
+    for (final p in filePaths) {
+      request.files.add(await http.MultipartFile.fromPath(fileField, p));
+    }
+    http.Response response;
+    try {
+      response = await http.Response.fromStream(await _http.send(request).timeout(const Duration(seconds: 120)));
+    } on Exception catch (e) {
+      debugPrint('API upload $path failed: $e');
+      throw ApiException('Cannot reach the server. Uploads need a connection.', code: 'NETWORK');
+    }
+    return _unwrap(response).data;
+  }
+
   /// Downloads a binary response such as a PDF.
   Future<Uint8List> getBytes(String path) async {
     http.Response response;
