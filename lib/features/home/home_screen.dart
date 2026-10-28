@@ -4,6 +4,7 @@ import '../../core/theme.dart';
 import '../../ui/widgets.dart';
 import '../accounting/accounting_screens.dart';
 import '../aggregators/aggregator_screens.dart';
+import '../backoffice/backoffice_screens.dart';
 import '../customers/customer_screens.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../delivery/delivery_screens.dart';
@@ -60,6 +61,10 @@ final modules = <Module>[
   Module('My deliveries', Icons.two_wheeler, null, (_) => const RiderScreen(), role: 'rider', group: 'People'),
   Module('Accounting', Icons.account_balance, 'accounting.view', (_) => const AccountingScreen(), group: 'Finance'),
   Module('Reports', Icons.bar_chart, 'reports.view', (_) => const ReportsScreen(), group: 'Finance'),
+  Module('Expenses', Icons.receipt, 'expenses.manage', (_) => const ExpensesScreen(), group: 'Finance'),
+  Module('Suppliers', Icons.local_shipping_outlined, 'inventory.view', (_) => const SuppliersScreen(), group: 'Inventory'),
+  Module('Loyalty', Icons.stars, 'loyalty.manage', (_) => const LoyaltyScreen(), group: 'People'),
+  Module('Activity log', Icons.history, 'activity.view', (_) => const ActivityLogScreen(), group: 'Finance'),
   Module('Aggregators', Icons.hub, 'aggregators.manage', (_) => const AggregatorsScreen(), group: 'Finance'),
 ];
 
