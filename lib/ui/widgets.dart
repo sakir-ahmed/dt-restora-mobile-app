@@ -549,9 +549,14 @@ class _ListModuleState extends State<ListModule> {
         builder: (context, rows, raw, reload) {
           if (rows.isEmpty) {
             return ListView(
-              children: const [
-                SizedBox(height: 120),
-                EmptyState('Nothing here yet.'),
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: widget.header == null
+                  ? null
+                  : const EdgeInsets.fromLTRB(12, 12, 12, 88),
+              children: [
+                ?widget.header,
+                const SizedBox(height: 120),
+                const EmptyState('Nothing here yet.'),
               ],
             );
           }

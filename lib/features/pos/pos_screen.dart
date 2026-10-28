@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_state.dart';
+import '../../core/local_db.dart';
+import '../../core/offline_orders.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../ui/food_image.dart';
@@ -44,6 +46,40 @@ class CartLine {
       '$itemId:${variantId ?? 0}:${(addOns.map((a) => a['id'] as num).toList()..sort()).join('.')}';
 }
 
+/// The order being revised when the POS opens in edit mode.
+///
+/// [local] is set for an order or revision that has not reached the server
+/// yet, so saving rewrites it on the device. Otherwise saving queues an
+/// `order_edit` for the server order, found by [orderId] or [orderClientId].
+class EditTarget {
+  const EditTarget._({
+    required this.order,
+    this.local,
+    this.orderId,
+    this.orderClientId,
+  });
+
+  factory EditTarget.local(LocalOrder local) =>
+      EditTarget._(order: local.order, local: local);
+
+  factory EditTarget.server(
+    Map<String, dynamic> order, {
+    int? orderId,
+    String? orderClientId,
+  }) => EditTarget._(
+    order: order,
+    orderId: orderId,
+    orderClientId: orderClientId,
+  );
+
+  final Map<String, dynamic> order;
+  final LocalOrder? local;
+  final int? orderId;
+  final String? orderClientId;
+
+  String get invoiceNo => '${order['invoice_no']}';
+}
+
 const _orderTypes = [
   ('dine_in', 'Dine in', Icons.restaurant),
   ('takeaway', 'Takeaway', Icons.shopping_bag_outlined),
@@ -53,7 +89,10 @@ const _orderTypes = [
 /// Point of sale. Works from the menu cached at sign-in, so it keeps
 /// working offline: orders are queued and sent when the network returns.
 class PosScreen extends StatefulWidget {
-  const PosScreen({super.key});
+  const PosScreen({super.key, this.edit});
+
+  /// Set to revise an existing order instead of starting a new one.
+  final EditTarget? edit;
 
   @override
   State<PosScreen> createState() => _PosScreenState();
@@ -91,7 +130,11 @@ class _PosScreenState extends State<PosScreen> {
       }
       setState(() => _listMode = p.getBool('pos_list_mode') ?? false);
       _loadHeld();
-      _restoreCart();
+      if (widget.edit != null) {
+        _seedFromEdit();
+      } else {
+        _restoreCart();
+      }
     });
   }
 
@@ -207,6 +250,9 @@ class _PosScreenState extends State<PosScreen> {
   };
 
   Future<void> _persist() async {
+    if (widget.edit != null) {
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsCartKey, jsonEncode(_snapshot()));
   }
@@ -1177,30 +1223,39 @@ class _PosScreenState extends State<PosScreen> {
                     type: TextInputType.phone,
                   ),
                   field(_note, 'Note for the kitchen (optional)'),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 5,
-                        child: OutlinedButton(
-                          onPressed: _busy
-                              ? null
-                              : () => _place(app, ctx, pay: false),
-                          child: const Text('Place order', maxLines: 1),
+                  if (widget.edit != null)
+                    FilledButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => _place(app, ctx, pay: false),
+                      icon: const Icon(Icons.save_outlined),
+                      label: Text('Save changes to ${widget.edit!.invoiceNo}'),
+                    )
+                  else
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 5,
+                          child: OutlinedButton(
+                            onPressed: _busy
+                                ? null
+                                : () => _place(app, ctx, pay: false),
+                            child: const Text('Place order', maxLines: 1),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 6,
-                        child: FilledButton.icon(
-                          onPressed: _busy
-                              ? null
-                              : () => _place(app, ctx, pay: true),
-                          icon: const Icon(Icons.payments),
-                          label: Text('Pay ${fmtMoney(totals.total)}'),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 6,
+                          child: FilledButton.icon(
+                            onPressed: _busy
+                                ? null
+                                : () => _place(app, ctx, pay: true),
+                            icon: const Icon(Icons.payments),
+                            label: Text('Pay ${fmtMoney(totals.total)}'),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -1346,6 +1401,279 @@ class _PosScreenState extends State<PosScreen> {
     setSheet(() {});
   }
 
+  // ------------------------------------------------------------ edit mode
+
+  /// Fills the cart from the order being revised, matching its lines to the
+  /// menu cached on this device.
+  void _seedFromEdit() {
+    final app = AppScope.read(context);
+    final order = widget.edit!.order;
+    final lines = _linesFromSnapshot([
+      for (final i in asRows(order['items']))
+        {
+          'i': (i['menu_item_id'] as num?)?.toInt(),
+          'v': (i['variant_id'] as num?)?.toInt(),
+          'q': (i['quantity'] as num).toInt(),
+          'a': [
+            for (final a in asRows(i['add_ons']))
+              if (a['id'] != null) (a['id'] as num).toInt(),
+          ],
+        },
+    ], app);
+    final input = order['discount_input'] as Map?;
+    setState(() {
+      _cart.addAll(lines);
+      _orderType = '${order['order_type'] ?? 'takeaway'}';
+      _tableId = (order['table_id'] as num?)?.toInt();
+      _note.text = '${order['note'] ?? ''}';
+      _customerMobile.text = '${order['customer_mobile'] ?? ''}';
+      if (input != null) {
+        _discountType = '${input['type']}';
+        _discountValue = toNum(input['value']);
+      } else if (toNum(order['discount_amount']) > 0) {
+        _discountType = 'fixed';
+        _discountValue = toNum(order['discount_amount']);
+      }
+    });
+  }
+
+  /// The cart as receipt lines: names, prices and the ids needed to edit the
+  /// order again later.
+  List<Map<String, dynamic>> _receiptLines() => [
+    for (final l in _cart)
+      {
+        'menu_item_id': l.itemId,
+        'variant_id': l.variantId,
+        'name': l.variant == null
+            ? '${l.item['name']}'
+            : '${l.item['name']} (${l.variant!['name']})',
+        'name_bn': l.item['name_bn'],
+        'quantity': l.quantity,
+        'unit_price': toNum(l.variant?['price'] ?? l.item['base_price'])
+            .toStringAsFixed(2),
+        'add_ons': [
+          for (final a in l.addOns)
+            {'id': a['id'], 'name': a['name'], 'price': a['price'], 'qty': 1},
+        ],
+        'line_total': l.total.toStringAsFixed(2),
+      },
+  ];
+
+  Map<String, dynamic> _snapshotFor(
+    AppState app, {
+    required String invoiceNo,
+    required ({double service, double vat, double discount, double total})
+    totals,
+    String? tokenNo,
+    double? tendered,
+    String? createdAt,
+  }) {
+    final tableName = asRows(app.bootstrap?['tables'])
+        .where((t) => (t['id'] as num?)?.toInt() == _tableId)
+        .map((t) => '${t['name']}')
+        .firstOrNull;
+    return {
+      ...OfflineOrders.snapshot(
+        app: app,
+        invoiceNo: invoiceNo,
+        orderType: _orderType,
+        lines: _receiptLines(),
+        subtotal: _subtotal,
+        discount: totals.discount,
+        service: totals.service,
+        vat: totals.vat,
+        total: totals.total,
+        tableName: _orderType == 'dine_in' ? tableName : null,
+        tableId: _orderType == 'dine_in' ? _tableId : null,
+        note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+        customerMobile: _customerMobile.text.trim().isEmpty
+            ? null
+            : _customerMobile.text.trim(),
+        tendered: tendered,
+        tokenNo: tokenNo,
+        createdAt: createdAt,
+      ),
+      if (_discountValue > 0)
+        'discount_input': {'type': _discountType, 'value': _discountValue},
+    };
+  }
+
+  /// Order fields shared by every offline write.
+  Map<String, dynamic> _orderFields(List<Map<String, dynamic>> items) => {
+    'order_type': _orderType,
+    'items': items,
+    if (_orderType == 'dine_in' && _tableId != null)
+      'restaurant_table_id': _tableId,
+    if (_customerMobile.text.trim().isNotEmpty)
+      'customer_mobile': _customerMobile.text.trim(),
+    if (_discountValue > 0)
+      'discount': {
+        'type': _discountType,
+        'value': _discountType == 'percent'
+            ? _discountValue.clamp(0, 100)
+            : _discountValue.clamp(0, _subtotal),
+      },
+    if (_note.text.trim().isNotEmpty) 'note': _note.text.trim(),
+  };
+
+  void _openReceipt(String clientId, {bool replace = false}) {
+    final route = MaterialPageRoute<void>(
+      builder: (_) => ReceiptScreen(localClientId: clientId),
+    );
+    if (replace) {
+      Navigator.of(context).pushReplacement(route);
+    } else {
+      Navigator.of(context).push(route);
+    }
+  }
+
+  /// A new order that could not reach the server: number it, keep a printable
+  /// copy and queue it for sync.
+  Future<void> _saveOffline(
+    AppState app,
+    BuildContext sheetContext,
+    List<Map<String, dynamic>> items,
+    ({double service, double vat, double discount, double total}) totals, {
+    required bool pay,
+  }) async {
+    final clientId = newClientId();
+    final invoice = await OfflineOrders.nextInvoice(app);
+    final token = await OfflineOrders.nextToken(app);
+    final order = _snapshotFor(
+      app,
+      invoiceNo: invoice,
+      totals: totals,
+      tokenNo: token,
+      tendered: pay ? totals.total : null,
+    );
+    await OfflineOrders.saveNew(
+      app,
+      clientId: clientId,
+      invoiceNo: invoice,
+      tokenNo: token,
+      order: order,
+    );
+    await app.queue(
+      'order',
+      {
+        'branch_id': app.branchId,
+        'terminal': 'T01',
+        'invoice_no': invoice,
+        ..._orderFields(items),
+        if (pay) 'tendered': totals.total,
+      },
+      label: 'POS order $invoice (${fmtMoney(totals.total)})',
+      clientId: clientId,
+    );
+    if (mounted && sheetContext.mounted) {
+      SoundFx.play('order_created');
+      _reset();
+      Navigator.of(sheetContext).pop();
+      snack(
+        context,
+        'Offline: $invoice saved. It will sync when the network is back.',
+      );
+      _openReceipt(clientId);
+    }
+  }
+
+  /// Saves a revision. An order still waiting on this device is rewritten in
+  /// place, keeping its invoice number and token; one already on the server
+  /// gets a queued `order_edit` and a fresh printable copy.
+  Future<void> _saveEdit(
+    AppState app,
+    BuildContext sheetContext,
+    List<Map<String, dynamic>> items,
+    ({double service, double vat, double discount, double total}) totals,
+  ) async {
+    final edit = widget.edit!;
+    final local = edit.local;
+    final invoice = edit.invoiceNo;
+    final token = edit.order['token_no'] as String?;
+    String clientId;
+
+    if (local != null) {
+      final queued = await app.db.outboxItem(local.clientId);
+      if (queued == null || queued.status != OutboxStatus.pending) {
+        if (sheetContext.mounted) {
+          snack(
+            sheetContext,
+            'This order was just synced. Open it again from Orders to edit it.',
+            error: true,
+          );
+        }
+        return;
+      }
+      clientId = local.clientId;
+      final wasPaid = queued.payload['tendered'] != null;
+      final payload = {
+        ...queued.payload,
+        ..._orderFields(items),
+        if (wasPaid) 'tendered': totals.total,
+      };
+      if (_orderType != 'dine_in') {
+        payload.remove('restaurant_table_id');
+      }
+      if (_discountValue <= 0) {
+        payload.remove('discount');
+      }
+      if (_customerMobile.text.trim().isEmpty) {
+        payload.remove('customer_mobile');
+      }
+      if (_note.text.trim().isEmpty) {
+        payload.remove('note');
+      }
+      await app.db.updateOutboxPayload(clientId, payload);
+      final order = _snapshotFor(
+        app,
+        invoiceNo: invoice,
+        totals: totals,
+        tokenNo: token,
+        tendered: wasPaid ? totals.total : null,
+        createdAt: '${local.order['created_at']}',
+      );
+      await app.db.saveLocalOrder(local.copyWith(order: order));
+      await app.refreshPending();
+    } else {
+      clientId = newClientId();
+      final order = _snapshotFor(
+        app,
+        invoiceNo: invoice,
+        totals: totals,
+        tokenNo: token,
+      );
+      await app.db.saveLocalOrder(
+        LocalOrder(
+          clientId: clientId,
+          kind: 'edit',
+          invoiceNo: invoice,
+          tokenNo: token,
+          order: order,
+          createdAt: DateTime.now().toUtc().toIso8601String(),
+          serverId: edit.orderId,
+        ),
+      );
+      await app.queue(
+        'order_edit',
+        {
+          if (edit.orderId != null) 'order_id': edit.orderId,
+          'order_client_id': ?edit.orderClientId,
+          ..._orderFields(items),
+        },
+        label: 'Edit $invoice',
+        clientId: clientId,
+      );
+    }
+
+    if (mounted && sheetContext.mounted) {
+      SoundFx.play('order_created');
+      _reset();
+      Navigator.of(sheetContext).pop();
+      snack(context, '$invoice updated.');
+      _openReceipt(clientId, replace: true);
+    }
+  }
+
   Future<void> _place(
     AppState app,
     BuildContext sheetContext, {
@@ -1355,6 +1683,28 @@ class _PosScreenState extends State<PosScreen> {
         _tableId == null &&
         asRows(app.bootstrap?['tables']).isNotEmpty) {
       snack(sheetContext, 'Choose a table for dine in.', error: true);
+      return;
+    }
+    if (widget.edit != null) {
+      setState(() => _busy = true);
+      try {
+        await _saveEdit(app, sheetContext, [
+          for (final l in _cart)
+            {
+              'menu_item_id': l.itemId,
+              'variant_id': ?l.variantId,
+              'quantity': l.quantity,
+              if (l.addOns.isNotEmpty)
+                'add_ons': [
+                  for (final a in l.addOns) {'id': a['id'], 'qty': 1},
+                ],
+            },
+        ], _totals(app));
+      } finally {
+        if (mounted) {
+          setState(() => _busy = false);
+        }
+      }
       return;
     }
     setState(() => _busy = true);
@@ -1371,7 +1721,6 @@ class _PosScreenState extends State<PosScreen> {
         },
     ];
     final totals = _totals(app);
-    final lineCount = _cart.length;
 
     try {
       final body = {
@@ -1430,41 +1779,24 @@ class _PosScreenState extends State<PosScreen> {
           );
         }
       } else if (mounted) {
-        snack(context, 'Order $invoice placed.');
+        final orderId = (order['id'] as num).toInt();
+        snack(
+          context,
+          'Order $invoice placed.',
+          actionLabel: 'Print',
+          onAction: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ReceiptScreen(orderId: orderId)),
+          ),
+        );
       }
     } on ApiException catch (e) {
       if (!e.isNetwork) {
         if (sheetContext.mounted) {
           snack(sheetContext, e.fullMessage, error: true);
         }
-      } else {
-        await app.queue('order', {
-          'branch_id': app.branchId,
-          'order_type': _orderType,
-          'terminal': 'T01',
-          'items': items,
-          if (_customerMobile.text.trim().isNotEmpty)
-            'customer_mobile': _customerMobile.text.trim(),
-          if (_discountValue > 0)
-            'discount': {
-              'type': _discountType,
-              'value': _discountType == 'percent'
-                  ? _discountValue.clamp(0, 100)
-                  : _discountValue.clamp(0, _subtotal),
-            },
-          if (pay) 'tendered': totals.total,
-        }, label: 'POS order ($lineCount lines, ${fmtMoney(totals.total)})');
-        if (mounted && sheetContext.mounted) {
-          SoundFx.play('order_created');
-          _reset();
-          Navigator.of(sheetContext).pop();
-          snack(
-            context,
-            pay
-                ? 'Offline: order and cash payment saved. Will sync.'
-                : 'Offline: order saved. Will sync.',
-          );
-        }
+      } else if (sheetContext.mounted) {
+        await _saveOffline(app, sheetContext, items, totals, pay: pay);
       }
     } finally {
       if (mounted) {

@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/api_client.dart';
+import '../../core/app_state.dart';
+import '../../core/local_db.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
+import '../pos/pos_screen.dart';
 import 'payment_sheet.dart';
 import 'receipt.dart';
 
@@ -40,21 +43,120 @@ class _OrdersScreenState extends State<OrdersScreen> {
       path: '/branches/${app.branchId}/orders',
       query: {'per_page': 50, if (_status != null) 'filter[status]': _status},
       extract: _orderRows,
-      header: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: [
-          for (final s in [null, 'pending', 'preparing', 'ready', 'served', 'paid', 'void'])
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(s == null ? 'All' : titleCase(s)),
-                selected: _status == s,
-                onSelected: (_) => setState(() => _status = s),
+      header: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const _LocalOrdersSection(),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            for (final s in [null, 'pending', 'preparing', 'ready', 'served', 'paid', 'void'])
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(s == null ? 'All' : titleCase(s)),
+                  selected: _status == s,
+                  onSelected: (_) => setState(() => _status = s),
+                ),
               ),
-            ),
-        ]),
-      ),
+          ]),
+        ),
+      ]),
       itemBuilder: (context, o, reload) => OrderCard(order: o, onChanged: reload),
+    );
+  }
+}
+
+/// Orders made or revised on this device that the server has not received
+/// yet. They can be viewed, printed, edited and paid with no network.
+class _LocalOrdersSection extends StatelessWidget {
+  const _LocalOrdersSection();
+
+  Future<void> _payCash(BuildContext context, AppState app, LocalOrder o) async {
+    final queued = await app.db.outboxItem(o.clientId);
+    if (queued == null || queued.status != OutboxStatus.pending || o.kind != 'order') {
+      return;
+    }
+    final total = toNum(o.order['total']);
+    await app.db.updateOutboxPayload(o.clientId, {...queued.payload, 'tendered': total});
+    await app.db.saveLocalOrder(o.copyWith(order: {
+      ...o.order,
+      'status': 'paid',
+      'payments': [
+        {
+          'method': 'cash',
+          'amount': total.toStringAsFixed(2),
+          'tendered': total.toStringAsFixed(2),
+          'change_due': '0.00',
+        },
+      ],
+    }));
+    await app.refreshPending();
+    if (context.mounted) {
+      snack(context, '${o.invoiceNo} marked paid in cash. It will sync with the order.');
+      await app.syncNow();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    return FutureBuilder<List<LocalOrder>>(
+      key: ValueKey('${app.pendingCount}-${app.syncing}'),
+      future: app.db.localOrders(synced: false),
+      builder: (context, snap) {
+        final orders = snap.data ?? const <LocalOrder>[];
+        if (orders.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SectionTitle('On this device (${orders.length})'),
+            for (final o in orders)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.cloud_off, color: Brand.warning),
+                  title: Text(o.invoiceNo, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: Text([
+                    o.kind == 'edit' ? 'Edit waiting to sync' : 'Waiting to sync',
+                    if (o.tokenNo != null) 'Token ${o.tokenNo}',
+                    titleCase('${o.order['order_type']}'),
+                  ].join('  -  ')),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text(fmtMoney(o.order['total']), style: const TextStyle(fontWeight: FontWeight.w700)),
+                    PopupMenuButton<String>(
+                      onSelected: (v) async {
+                        if (v == 'receipt') {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => ReceiptScreen(localClientId: o.clientId)),
+                          );
+                        } else if (v == 'edit') {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => PosScreen(edit: EditTarget.local(o))),
+                          );
+                        } else if (v == 'pay') {
+                          await _payCash(context, app, o);
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(value: 'receipt', child: Text('Receipt and kitchen token')),
+                        const PopupMenuItem(value: 'edit', child: Text('Edit order')),
+                        if (o.kind == 'order' && '${o.order['status']}' != 'paid')
+                          const PopupMenuItem(value: 'pay', child: Text('Mark paid in cash')),
+                      ],
+                    ),
+                  ]),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => ReceiptScreen(localClientId: o.clientId)),
+                  ),
+                ),
+              ),
+            const SectionTitle('On the server'),
+          ]),
+        );
+      },
     );
   }
 }
@@ -122,20 +224,40 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Future<void> _refresh() async {
     final app = AppScope.read(context);
-    final fresh = await app.api.get('/branches/${app.branchId}/orders/${_order['id']}');
-    if (mounted) {
-      setState(() => _order = Map<String, dynamic>.from(fresh as Map));
+    try {
+      final fresh = await app.api.get('/branches/${app.branchId}/orders/${_order['id']}');
+      if (mounted) {
+        setState(() => _order = Map<String, dynamic>.from(fresh as Map));
+      }
+    } on ApiException catch (e) {
+      // Offline: keep showing the copy already on screen.
+      if (!e.isNetwork) {
+        rethrow;
+      }
     }
   }
 
   Future<void> _setStatus(String status) async {
     final app = AppScope.read(context);
+    var queued = false;
     final ok = await guarded(context, () async {
-      await app.api.patch('/branches/${app.branchId}/orders/${_order['id']}/status', body: {'status': status});
-      await _refresh();
+      try {
+        await app.api.patch('/branches/${app.branchId}/orders/${_order['id']}/status', body: {'status': status});
+        await _refresh();
+      } on ApiException catch (e) {
+        if (!e.isNetwork) {
+          rethrow;
+        }
+        queued = true;
+        await app.queue('order_status', {'order_id': _order['id'], 'status': status},
+            label: '${_order['invoice_no']} to $status');
+        if (mounted) {
+          setState(() => _order = {..._order, 'status': status});
+        }
+      }
     });
     if (ok && mounted) {
-      snack(context, 'Marked ${titleCase(status)}.');
+      snack(context, queued ? 'Offline: ${titleCase(status)} saved. It will sync.' : 'Marked ${titleCase(status)}.');
     }
   }
 
@@ -276,12 +398,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       appBar: AppBar(
         title: Text('${_order['invoice_no']}'),
         actions: [
-          if (status == 'paid')
-            IconButton(
-              tooltip: 'Print receipt',
-              icon: const Icon(Icons.print),
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReceiptScreen(orderId: (_order['id'] as num).toInt()))),
-            ),
+          IconButton(
+            tooltip: 'Receipt, kitchen token and edit',
+            icon: const Icon(Icons.print),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReceiptScreen(order: _order))),
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -394,14 +515,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               label: const Text('Redeem loyalty points'),
             ),
           ],
-          if (status == 'paid') ...[
-            const SizedBox(height: 8),
-            FilledButton.tonalIcon(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReceiptScreen(orderId: (_order['id'] as num).toInt()))),
-              icon: const Icon(Icons.receipt),
-              label: const Text('Receipt and print'),
-            ),
-          ],
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReceiptScreen(order: _order))),
+            icon: const Icon(Icons.receipt),
+            label: const Text('Receipt, kitchen token and edit'),
+          ),
           if (status != 'void' && app.can('orders.create') && !voidPending) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -509,7 +628,15 @@ class _KitchenScreenState extends State<KitchenScreen> {
       }
     });
     final ok = await guarded(context, () async {
-      await app.api.patch('/branches/${app.branchId}/orders/${order['id']}/status', body: {'status': to});
+      try {
+        await app.api.patch('/branches/${app.branchId}/orders/${order['id']}/status', body: {'status': to});
+      } on ApiException catch (e) {
+        if (!e.isNetwork) {
+          rethrow;
+        }
+        // Offline: keep the new stage on screen and send it when back online.
+        await app.queue('order_status', {'order_id': order['id'], 'status': to}, label: '${order['invoice_no']} to $to');
+      }
     });
     if (!ok && mounted) {
       setState(() {
