@@ -57,7 +57,8 @@ class _AppShellState extends State<_AppShell> {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    return Stack(children: [
+    // The Stack sits above MaterialApp, so it needs its own text direction.
+    return Stack(textDirection: TextDirection.ltr, children: [
       MaterialApp(
         title: state.appName,
         debugShowCheckedModeBanner: false,

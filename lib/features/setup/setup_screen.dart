@@ -73,11 +73,9 @@ class _SetupScreenState extends State<SetupScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  const Text('App name', style: TextStyle(fontWeight: FontWeight.w700)),
-                  field(_name, 'e.g. Arman\'s Kitchen'),
-                  const SizedBox(height: 6),
-                  const Text('Server address (API base URL)', style: TextStyle(fontWeight: FontWeight.w700)),
-                  field(_url, 'https://your-server.com/api/v1', type: TextInputType.url),
+                  field(_name, 'App name', hint: 'e.g. Arman\'s Kitchen'),
+                  field(_url, 'Server address (API base URL)',
+                      hint: 'https://your-server.com/api/v1', type: TextInputType.url),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.all(10),
