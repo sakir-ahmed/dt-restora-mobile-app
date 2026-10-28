@@ -44,6 +44,15 @@ class ReceiptData {
   String name(Map<String, dynamic> m) =>
       bangla && (m['name_bn'] ?? '').toString().isNotEmpty ? '${m['name_bn']}' : '${m['name']}';
 
+  int _addOnQty(Map<String, dynamic> a) => (a['qty'] as num?)?.toInt() ?? 1;
+
+  /// "+ 2 x Egg": how many of the add-on per item, when more than one.
+  String addOnLabel(Map<String, dynamic> a) =>
+      '    + ${_addOnQty(a) > 1 ? '${_addOnQty(a)} x ' : ''}${name(a)}';
+
+  /// The add-on's price for one item times its quantity.
+  String addOnAmount(Map<String, dynamic> a) => _money(toNum(a['price']) * _addOnQty(a));
+
   String get invoice => '${order['invoice_no']}';
 
   List<ReceiptRow> headerRows() => [
@@ -113,7 +122,7 @@ class ReceiptData {
     for (final i in items) {
       await shaper.prepare(name(i), 9, maxWidth: textWidth);
       for (final a in asRows(i['add_ons'])) {
-        await shaper.prepare('    + ${name(a)}', 9, maxWidth: textWidth);
+        await shaper.prepare(addOnLabel(a), 9, maxWidth: textWidth);
       }
     }
     pw.Widget pair(ReceiptRow r) => pw.Padding(
@@ -180,7 +189,7 @@ class ReceiptData {
                 ),
               ),
               for (final a in asRows(i['add_ons']))
-                pair(ReceiptRow('    + ${name(a)}', _money(a['price']))),
+                pair(ReceiptRow(addOnLabel(a), addOnAmount(a))),
             ],
             line,
             for (final r in totalRows()) pair(r),
@@ -657,7 +666,7 @@ class _Paper extends StatelessWidget {
               ),
             ),
             for (final a in asRows(i['add_ons']))
-              pair(ReceiptRow('    + ${data.name(a)}', _money(a['price']))),
+              pair(ReceiptRow(data.addOnLabel(a), data.addOnAmount(a))),
           ],
           rule,
           for (final r in data.totalRows()) pair(r),

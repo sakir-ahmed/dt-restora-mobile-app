@@ -13,6 +13,7 @@ import '../../ui/food_image.dart';
 import '../../ui/widgets.dart';
 import '../orders/payment_sheet.dart';
 import '../orders/receipt.dart';
+import 'options_sheet.dart';
 
 /// Whole taka without decimals, e.g. `BDT 560`, for compact price tags.
 String _short(double v) =>
@@ -27,23 +28,29 @@ class CartLine {
   }) : addOns = List.of(addOns);
 
   final Map<String, dynamic> item;
-  final Map<String, dynamic>? variant;
+  Map<String, dynamic>? variant;
 
-  /// Chosen add-ons, each with `id`, `name` and `price`. One of each per unit.
-  final List<Map<String, dynamic>> addOns;
+  /// Chosen add-ons, each with `id`, `name`, `price` and `qty` (how many per
+  /// unit, 1 when missing).
+  List<Map<String, dynamic>> addOns;
   int quantity;
 
   int get itemId => (item['id'] as num).toInt();
   int? get variantId => (variant?['id'] as num?)?.toInt();
-  double get addOnsPerUnit => addOns.fold(0, (s, a) => s + toNum(a['price']));
+  double get addOnsPerUnit =>
+      addOns.fold(0, (s, a) => s + toNum(a['price']) * _addOnQty(a));
 
   /// Price of one unit including its add-ons.
   double get unitPrice =>
       toNum(variant?['price'] ?? item['base_price']) + addOnsPerUnit;
   double get total => unitPrice * quantity;
-  String get addOnNames => addOns.map((a) => '${a['name']}').join(', ');
+  String get addOnNames => addOns
+      .map((a) => _addOnQty(a) > 1 ? '${_addOnQty(a)}x ${a['name']}' : '${a['name']}')
+      .join(', ');
   String get key =>
-      '$itemId:${variantId ?? 0}:${(addOns.map((a) => a['id'] as num).toList()..sort()).join('.')}';
+      '$itemId:${variantId ?? 0}:${(addOns.map((a) => '${(a['id'] as num).toInt()}x${_addOnQty(a)}').toList()..sort()).join('.')}';
+
+  static int _addOnQty(Map<String, dynamic> a) => (a['qty'] as num?)?.toInt() ?? 1;
 }
 
 /// The order being revised when the POS opens in edit mode.
@@ -115,7 +122,7 @@ class _PosScreenState extends State<PosScreen> {
   double _discountValue = 0;
 
   /// Parked orders: [{orderType, tableId, discountType, discountValue,
-  /// customerMobile, note, heldAt, lines: [{i, v, q, a: [addOnIds]}]}].
+  /// customerMobile, note, heldAt, lines: [{i, v, q, a: [{id, q}]}]}].
   List<Map<String, dynamic>> _held = [];
 
   String get _prefsCartKey => 'pos_cart';
@@ -244,7 +251,10 @@ class _PosScreenState extends State<PosScreen> {
           'i': l.itemId,
           'v': l.variantId,
           'q': l.quantity,
-          'a': [for (final a in l.addOns) a['id']],
+          'a': [
+            for (final a in l.addOns)
+              {'id': a['id'], 'q': (a['qty'] as num?)?.toInt() ?? 1},
+          ],
         },
     ],
   };
@@ -302,20 +312,25 @@ class _PosScreenState extends State<PosScreen> {
       final variant = variants
           .where((v) => (v['id'] as num?)?.toInt() == row['v'])
           .firstOrNull;
-      final addOnIds = ((row['a'] as List?) ?? const [])
-          .map((e) => (e as num).toInt())
-          .toSet();
-      final addOns = _activeAddOns(item)
-          .where((a) => addOnIds.contains((a['id'] as num).toInt()))
-          .map(
-            (a) => {
+      // Saved carts hold plain ids (older versions) or {id, q} with how many.
+      final wanted = <int, int>{
+        for (final e in (row['a'] as List?) ?? const [])
+          if (e is Map)
+            (e['id'] as num).toInt(): (e['q'] as num?)?.toInt() ?? 1
+          else
+            (e as num).toInt(): 1,
+      };
+      final addOns = [
+        for (final a in _activeAddOns(item))
+          if (wanted.containsKey((a['id'] as num).toInt()))
+            {
               'id': a['id'],
               'name': a['name'],
               'name_bn': a['name_bn'],
               'price': a['price'],
+              'qty': wanted[(a['id'] as num).toInt()],
             },
-          )
-          .toList();
+      ];
       lines.add(
         CartLine(
           item: item,
@@ -521,215 +536,44 @@ class _PosScreenState extends State<PosScreen> {
 
   Future<void> _pick(AppState app, Map<String, dynamic> item) async {
     final variants = asRows(item['variants']);
-    final addOns = _activeAddOns(item);
-    if (variants.length <= 1 && addOns.isEmpty) {
+    if (variants.length <= 1 && _activeAddOns(item).isEmpty) {
       _add(item, variants.isEmpty ? null : variants.first);
       return;
     }
-    // Sizes, or one "quantity" row when there is a single size.
-    final rows = variants.length > 1
-        ? variants
-        : [
-            {
-              'id': (variants.firstOrNull?['id'] as num?)?.toInt() ?? 0,
-              'name': variants.isEmpty
-                  ? 'Quantity'
-                  : '${variants.first['name']}',
-              'name_bn': variants.firstOrNull?['name_bn'],
-              'price': variants.firstOrNull?['price'] ?? item['base_price'],
-            },
-          ];
-    final itemId = (item['id'] as num).toInt();
-    final chosenAddOns = <int>{};
+    final picks = await showOptionsSheet(context, app: app, item: item);
+    if (picks == null || !mounted) {
+      return;
+    }
+    for (final p in picks) {
+      _add(item, p.variant, p.quantity, p.addOns);
+    }
+  }
 
-    // Every tap changes the order at once; the sheet only shows what is in it.
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.92,
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          final selected = [
-            for (final a in addOns)
-              if (chosenAddOns.contains((a['id'] as num).toInt()))
-                {'id': a['id'], 'name': localized(app, a), 'price': a['price']},
-          ];
-          final selectedKey =
-              (selected.map((a) => a['id'] as num).toList()..sort()).join('.');
-          CartLine? lineFor(Map<String, dynamic> v) {
-            final vid = variants.length > 1
-                ? (v['id'] as num).toInt()
-                : (variants.firstOrNull?['id'] as num?)?.toInt() ?? 0;
-            return _cart
-                .where((l) => l.key == '$itemId:$vid:$selectedKey')
-                .firstOrNull;
-          }
-
-          final inOrder = _cart.where((l) => l.itemId == itemId);
-          final count = inOrder.fold(0, (s, l) => s + l.quantity);
-          final total = inOrder.fold<double>(0, (s, l) => s + l.total);
-
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Flexible(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(14),
-                            child: SizedBox(
-                              height: 110,
-                              child: FoodImage(
-                                url: foodImageUrl(app, item),
-                                iconSize: 40,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            localized(app, item),
-                            style: Theme.of(ctx).textTheme.titleLarge,
-                          ),
-                          if ((item['description'] as String?)?.isNotEmpty ==
-                              true)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                localized(app, item, 'description'),
-                                style: TextStyle(
-                                  color: ctx.muted,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          if (addOns.isNotEmpty) ...[
-                            const SectionTitle(
-                              'Add-ons (tick before choosing a size)',
-                            ),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final a in addOns)
-                                  FilterChip(
-                                    label: Text(
-                                      '${localized(app, a)}  +${_short(toNum(a['price']))}',
-                                    ),
-                                    selected: chosenAddOns.contains(
-                                      (a['id'] as num).toInt(),
-                                    ),
-                                    onSelected: (on) => setSheet(() {
-                                      final id = (a['id'] as num).toInt();
-                                      on
-                                          ? chosenAddOns.add(id)
-                                          : chosenAddOns.remove(id);
-                                    }),
-                                  ),
-                              ],
-                            ),
-                          ],
-                          SectionTitle(
-                            variants.length > 1
-                                ? 'Tap a size to add it'
-                                : 'Tap to add',
-                          ),
-                          for (final v in rows)
-                            Builder(
-                              builder: (_) {
-                                final line = lineFor(v);
-                                final unit =
-                                    toNum(v['price']) +
-                                    selected.fold<double>(
-                                      0,
-                                      (s, a) => s + toNum(a['price']),
-                                    );
-                                void add() {
-                                  _add(
-                                    item,
-                                    variants.length > 1
-                                        ? v
-                                        : variants.firstOrNull,
-                                    1,
-                                    selected,
-                                  );
-                                  setSheet(() {});
-                                }
-
-                                return Card(
-                                  child: ListTile(
-                                    onTap: add,
-                                    title: Text(
-                                      localized(app, v),
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    subtitle: Text(
-                                      fmtMoney(unit),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: ctx.brand,
-                                      ),
-                                    ),
-                                    trailing: line == null
-                                        ? _RoundButton(
-                                            icon: Icons.add,
-                                            onTap: add,
-                                            size: 32,
-                                          )
-                                        : _Stepper(
-                                            qty: line.quantity,
-                                            onMinus: () {
-                                              _decrement(line);
-                                              setSheet(() {});
-                                            },
-                                            onPlus: add,
-                                          ),
-                                  ),
-                                );
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          count == 0
-                              ? 'Nothing added yet'
-                              : '$count in order  -  ${fmtMoney(total)}',
-                          style: TextStyle(
-                            color: ctx.muted,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Done'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+  /// Change the size, add-ons or quantity of a line already in the order,
+  /// like the options button on a web POS line. A line that ends up the
+  /// same as another one merges into it.
+  Future<void> _editLine(AppState app, CartLine line) async {
+    final result = await showOptionsSheet(
+      context,
+      app: app,
+      item: line.item,
+      editing: OptionLine(line.variant, line.quantity, line.addOns),
     );
+    if (result == null || result.isEmpty || !mounted) {
+      return;
+    }
+    final next = result.first;
+    setState(() {
+      line.variant = next.variant;
+      line.addOns = next.addOns;
+      line.quantity = next.quantity;
+      final twin = _cart.where((l) => !identical(l, line) && l.key == line.key).firstOrNull;
+      if (twin != null) {
+        twin.quantity += line.quantity;
+        _cart.remove(line);
+      }
+    });
+    _persist();
   }
 
   // ------------------------------------------------------------ item card
@@ -1126,8 +970,34 @@ class _PosScreenState extends State<PosScreen> {
                                       color: ctx.brand,
                                       fontSize: 11.5,
                                     ),
-                                    maxLines: 1,
+                                    maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
+                                  ),
+                                if (_activeAddOns(l.item).isNotEmpty ||
+                                    asRows(l.item['variants']).length > 1)
+                                  InkWell(
+                                    onTap: () async {
+                                      await _editLine(app, l);
+                                      refresh();
+                                    },
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 4),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.tune, size: 14, color: ctx.brand),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Size and add-ons',
+                                            style: TextStyle(
+                                              color: ctx.brand,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                               ],
                             ),
@@ -1416,7 +1286,8 @@ class _PosScreenState extends State<PosScreen> {
           'q': (i['quantity'] as num).toInt(),
           'a': [
             for (final a in asRows(i['add_ons']))
-              if (a['id'] != null) (a['id'] as num).toInt(),
+              if (a['id'] != null)
+                {'id': (a['id'] as num).toInt(), 'q': (a['qty'] as num?)?.toInt() ?? 1},
           ],
         },
     ], app);
@@ -1453,7 +1324,7 @@ class _PosScreenState extends State<PosScreen> {
             .toStringAsFixed(2),
         'add_ons': [
           for (final a in l.addOns)
-            {'id': a['id'], 'name': a['name'], 'name_bn': a['name_bn'], 'price': a['price'], 'qty': 1},
+            {'id': a['id'], 'name': a['name'], 'name_bn': a['name_bn'], 'price': a['price'], 'qty': (a['qty'] as num?)?.toInt() ?? 1},
         ],
         'line_total': l.total.toStringAsFixed(2),
       },
@@ -1696,7 +1567,8 @@ class _PosScreenState extends State<PosScreen> {
               'quantity': l.quantity,
               if (l.addOns.isNotEmpty)
                 'add_ons': [
-                  for (final a in l.addOns) {'id': a['id'], 'qty': 1},
+                  for (final a in l.addOns)
+                      {'id': a['id'], 'qty': (a['qty'] as num?)?.toInt() ?? 1},
                 ],
             },
         ], _totals(app));
@@ -1716,7 +1588,8 @@ class _PosScreenState extends State<PosScreen> {
           'quantity': l.quantity,
           if (l.addOns.isNotEmpty)
             'add_ons': [
-              for (final a in l.addOns) {'id': a['id'], 'qty': 1},
+              for (final a in l.addOns)
+                      {'id': a['id'], 'qty': (a['qty'] as num?)?.toInt() ?? 1},
             ],
         },
     ];
