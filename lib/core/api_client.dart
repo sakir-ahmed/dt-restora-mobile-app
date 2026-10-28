@@ -118,6 +118,26 @@ class ApiClient {
 
   Future<dynamic> delete(String path) async => (await send('DELETE', path)).data;
 
+  /// Downloads a binary response such as a PDF.
+  Future<Uint8List> getBytes(String path) async {
+    http.Response response;
+    try {
+      response = await _http
+          .get(_uri(path, null), headers: {..._headers(), 'Accept': '*/*'})
+          .timeout(const Duration(seconds: 30));
+    } on Exception catch (e) {
+      debugPrint('API GET $path failed: $e');
+      throw ApiException('Cannot reach the server.', code: 'NETWORK');
+    }
+    if (response.statusCode == 401) {
+      _unauthorized.add(null);
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException('The file could not be downloaded (${response.statusCode}).', status: response.statusCode);
+    }
+    return response.bodyBytes;
+  }
+
   Future<ApiResult> send(
     String method,
     String path, {

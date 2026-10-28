@@ -71,6 +71,8 @@ Color groupColor(BuildContext context, String group) {
       return dark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
     case 'Finance':
       return dark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+    case 'Website':
+      return dark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
     default:
       return dark ? Brand.soft : Brand.slate;
   }

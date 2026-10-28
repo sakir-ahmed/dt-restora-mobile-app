@@ -5,6 +5,7 @@ import '../../ui/widgets.dart';
 import '../accounting/accounting_screens.dart';
 import '../aggregators/aggregator_screens.dart';
 import '../backoffice/backoffice_screens.dart';
+import '../content/content_screens.dart';
 import '../customers/customer_screens.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../delivery/delivery_screens.dart';
@@ -65,6 +66,11 @@ final modules = <Module>[
   Module('Suppliers', Icons.local_shipping_outlined, 'inventory.view', (_) => const SuppliersScreen(), group: 'Inventory'),
   Module('Loyalty', Icons.stars, 'loyalty.manage', (_) => const LoyaltyScreen(), group: 'People'),
   Module('Activity log', Icons.history, 'activity.view', (_) => const ActivityLogScreen(), group: 'Finance'),
+  Module('Letters', Icons.mail_outline, 'letters.manage', (_) => const LettersScreen(), group: 'People'),
+  Module('Branches', Icons.storefront, 'branches.view', (_) => const BranchesScreen(), group: 'Finance'),
+  Module('Blog', Icons.article_outlined, 'blog.manage', (_) => const BlogScreen(), group: 'Website'),
+  Module('Careers', Icons.work_outline, 'careers.manage', (_) => const CareersScreen(), group: 'Website'),
+  Module('Media', Icons.photo_library_outlined, 'media.view', (_) => const MediaScreen(), group: 'Website'),
   Module('Aggregators', Icons.hub, 'aggregators.manage', (_) => const AggregatorsScreen(), group: 'Finance'),
 ];
 
