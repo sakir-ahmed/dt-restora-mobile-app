@@ -118,7 +118,9 @@ class AppState extends ChangeNotifier {
     appName = prefs.getString('app_name') ?? 'DT Restora';
     configured = prefs.getBool('app_configured') ?? false;
     brandKey = prefs.getString('brand_key') ?? 'blue';
+    locale = prefs.getString('menu_locale') ?? 'en';
     await api.restore();
+    api.language = locale;
     _unauthSub = api.onUnauthorized.listen((_) => logout(silent: true));
     _connectivity = Connectivity().onConnectivityChanged.listen((results) {
       final nowOnline = results.any((r) => r != ConnectivityResult.none);
@@ -201,10 +203,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setLocale(String code) {
+  Future<void> setLocale(String code) async {
     locale = code;
     api.language = code;
     notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('menu_locale', code);
   }
 
   /// Saves the one-time app configuration from the setup screen. The setup
