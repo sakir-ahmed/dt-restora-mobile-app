@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/offline_orders.dart';
 import '../../core/theme.dart';
 import '../../ui/widgets.dart';
 
@@ -132,6 +133,14 @@ class _PosSettingsScreenState extends State<PosSettingsScreen> {
           ),
           const SizedBox(height: 12),
           field(_pattern, 'Invoice number pattern'),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _pattern.text = OfflineOrders.defaultPattern),
+              icon: const Icon(Icons.restart_alt, size: 18),
+              label: const Text('Use the default pattern'),
+            ),
+          ),
           Text(
             'Tokens: {BRANCH} {TERMINAL} {YYYY} {YY} {MM} {DD} {TIME} {RAND} {SEQ}. '
             'Use {TIME} and {RAND} so terminals that are offline never repeat a number. '

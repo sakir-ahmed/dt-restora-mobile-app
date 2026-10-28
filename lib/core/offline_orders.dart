@@ -9,7 +9,7 @@ import 'local_db.dart';
 class OfflineOrders {
   const OfflineOrders._();
 
-  static const _defaultPattern =
+  static const defaultPattern =
       '{BRANCH}-{TERMINAL}-{YYYY}{MM}{DD}-{TIME}-{RAND}';
   static const _alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -33,8 +33,8 @@ class OfflineOrders {
     final settings = Map<String, dynamic>.from(
       (branch['pos_settings'] as Map?) ?? const {},
     );
-    final pattern = '${settings['invoice_pattern'] ?? _defaultPattern}';
-    return pattern.contains('{SEQ}') ? _defaultPattern : pattern;
+    final pattern = '${settings['invoice_pattern'] ?? defaultPattern}';
+    return pattern.contains('{SEQ}') ? defaultPattern : pattern;
   }
 
   /// A new invoice number such as `BR01-T01-20261028-143205-K7Q4`, never one
