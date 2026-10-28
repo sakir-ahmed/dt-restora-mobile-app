@@ -57,33 +57,36 @@ class _AppShellState extends State<_AppShell> {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    // The Stack sits above MaterialApp, so it needs its own text direction.
-    return Stack(textDirection: TextDirection.ltr, children: [
-      MaterialApp(
-        title: state.appName,
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(Brightness.light, brandKey: state.brandKey),
-        darkTheme: buildTheme(Brightness.dark, brandKey: state.brandKey),
-        // The device's colour scheme by default, the saved choice once
-        // the user picks one in the app bar or drawer.
-        themeMode: state.themeMode,
-        home: const _Root(),
-        // The footer sits below the navigator, so screens, drawers and
-        // bottom sheets all stop above it — nothing can hide behind the
-        // screen edge anywhere in the app.
-        builder: (context, child) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(child: child ?? const SizedBox.shrink()),
-            const AppFooter(),
-          ],
-        ),
+    return MaterialApp(
+      scaffoldMessengerKey: rootMessengerKey,
+      title: state.appName,
+      debugShowCheckedModeBanner: false,
+      theme: buildTheme(Brightness.light, brandKey: state.brandKey),
+      darkTheme: buildTheme(Brightness.dark, brandKey: state.brandKey),
+      // The device's colour scheme by default, the saved choice once
+      // the user picks one in the app bar or drawer.
+      themeMode: state.themeMode,
+      home: const _Root(),
+      // The footer sits below the navigator, so screens, drawers and
+      // bottom sheets all stop above it, and the splash covers it all.
+      // Both live inside the app so they get its direction, theme and
+      // media query.
+      builder: (context, child) => Stack(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: child ?? const SizedBox.shrink()),
+              const AppFooter(),
+            ],
+          ),
+          if (!_splashDone)
+            Positioned.fill(
+              child: SplashScreen(onDone: () => setState(() => _splashDone = true)),
+            ),
+        ],
       ),
-      if (!_splashDone)
-        Positioned.fill(
-          child: SplashScreen(onDone: () => setState(() => _splashDone = true)),
-        ),
-    ]);
+    );
   }
 }
 
